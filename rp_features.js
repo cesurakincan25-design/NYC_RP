@@ -1110,3 +1110,253 @@ const FEATURE_CSS = `
     console.log('[rp_features] Loaded: CharPicker, TagSystem, CharCard, Reactions, ReadReceipts');
   });
 })();
+
+/* ════════════════════════════════════════════════════════
+   6. AUTOCOMPLETE — phone-style predictive input
+   Triggers on any partial word: "Ales" → "Alessandra Waggner: "
+   Sources: characters, orgs, vehicles, properties, equipments
+   Arrow keys navigate, Enter/Tab confirms, Esc dismisses
+════════════════════════════════════════════════════════ */
+const Autocomplete = {
+  visible:  false,
+  items:    [],
+  selected: -1,
+  _trigger: '',   // the partial word that triggered this
+  _triggerStart: 0,
+
+  // Build full search pool from all DB entities
+  _pool() {
+    const pool = [];
+    // Characters
+    S.chars.forEach(c => {
+      if (c.status === 'Deceased') return;
+      const org = RP._org((c.organizations||[])[0]||c.organization);
+      const user = USERS?.find(u => u.id === c.playerId);
+      pool.push({
+        type:    'char',
+        id:      c.id,
+        label:   c.name,
+        sub:     c.alias ? `"${c.alias}"${org?' · '+org.name:''}` : (org?.name||'NPC'),
+        color:   user?.color || org?.color || 'var(--ac)',
+        icon:    'fa-user',
+        insert:  c.name + ': ',
+        avatar:  c.image || '',
+      });
+      // Also match alias
+      if (c.alias) pool.push({
+        type: 'char', id: c.id, label: c.alias,
+        sub: c.name + (org?' · '+org.name:''),
+        color: user?.color || org?.color || 'var(--ac)',
+        icon: 'fa-user', insert: c.name + ': ', avatar: c.image||'',
+      });
+    });
+
+    // Orgs
+    S.orgs.forEach(o => pool.push({
+      type:'org', id:o.id, label:o.name, sub:'Organizasyon',
+      color:o.color||'var(--gn)', icon:'fa-building', insert:'['+o.name+'] ', avatar:'',
+    }));
+
+    // Vehicles (from S._db if loaded)
+    (S._db?.vehicles||[]).forEach(v => pool.push({
+      type:'vehicle', id:v.id, label:v.plate||v.name||v.id,
+      sub:(v.make||'')+(v.model?' '+v.model:'')+(v.owner?' — '+v.owner:''),
+      color:'var(--am)', icon:'fa-car', insert:'['+( v.plate||v.name||v.id)+'] ', avatar:'',
+    }));
+
+    // Properties
+    (S._db?.properties||[]).forEach(p => pool.push({
+      type:'property', id:p.id, label:p.name||p.address||p.id,
+      sub:(p.type||'Mülk')+(p.owner?' — '+p.owner:''),
+      color:'var(--pu)', icon:'fa-home', insert:'['+( p.name||p.address||p.id)+'] ', avatar:'',
+    }));
+
+    // Equipments
+    (S._db?.equipments||[]).forEach(e => pool.push({
+      type:'equip', id:e.id, label:e.name||e.id,
+      sub:(e.type||'Ekipman')+(e.owner?' — '+e.owner:''),
+      color:'var(--gd)', icon:'fa-box', insert:'['+( e.name||e.id)+'] ', avatar:'',
+    }));
+
+    return pool;
+  },
+
+  check(inp) {
+    const val  = inp.value;
+    const pos  = inp.selectionStart;
+    // Find the current word being typed (from last newline or start)
+    const before = val.slice(0, pos);
+    const wordMatch = before.match(/(\S{2,})$/);
+    if (!wordMatch) { this.hide(); return; }
+
+    const word = wordMatch[1].toLowerCase();
+    this._trigger     = wordMatch[1];
+    this._triggerStart = pos - wordMatch[1].length;
+
+    // Score and filter
+    const pool = this._pool();
+    const results = pool
+      .filter(item => {
+        const hay = item.label.toLowerCase();
+        // Must start with the typed word OR contain it
+        return hay.startsWith(word) || hay.includes(word);
+      })
+      .sort((a, b) => {
+        const al = a.label.toLowerCase(), bl = b.label.toLowerCase();
+        const aStart = al.startsWith(word) ? 0 : 1;
+        const bStart = bl.startsWith(word) ? 0 : 1;
+        return aStart - bStart || al.localeCompare(bl);
+      })
+      .slice(0, 8);
+
+    if (!results.length) { this.hide(); return; }
+    this.items    = results;
+    this.selected = 0;
+    this._render(inp);
+  },
+
+  _render(inp) {
+    this.visible = true;
+    let popup = document.getElementById('ac-popup');
+    if (!popup) {
+      popup = document.createElement('div');
+      popup.id = 'ac-popup';
+      popup.className = 'ac-popup';
+      document.body.appendChild(popup);
+    }
+
+    popup.innerHTML = '';
+    this.items.forEach((item, i) => {
+      const el = document.createElement('div');
+      el.className = 'ac-item' + (i === this.selected ? ' ac-selected' : '');
+      el.dataset.idx = i;
+      const ini = (item.label||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+      el.innerHTML = `
+        <div class="ac-ava" style="background:${item.color}22;border:1px solid ${item.color}44">
+          ${item.avatar
+            ? `<img src="${item.avatar}" onerror="this.parentNode.innerHTML='<i class=\\"fas ${item.icon}\\" style=\\"color:${item.color};font-size:10px\\"></i>'" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+            : `<i class="fas ${item.icon}" style="color:${item.color};font-size:10px"></i>`}
+        </div>
+        <div class="ac-info">
+          <div class="ac-label">${this._highlight(item.label, this._trigger)}</div>
+          <div class="ac-sub">${item.sub}</div>
+        </div>
+        <div class="ac-type-badge" style="color:${item.color};border-color:${item.color}44;background:${item.color}15">${item.type}</div>`;
+      el.onclick = () => { this.selected = i; this.confirm(); };
+      el.onmouseenter = () => {
+        this.selected = i;
+        popup.querySelectorAll('.ac-item').forEach((x,j) => x.classList.toggle('ac-selected', j===i));
+      };
+      popup.appendChild(el);
+    });
+
+    // Position above the input
+    const rect = inp.getBoundingClientRect();
+    const popH = Math.min(this.items.length * 44 + 8, 360);
+    popup.style.cssText = `
+      position:fixed;
+      left:${rect.left}px;
+      bottom:${window.innerHeight - rect.top + 4}px;
+      width:${Math.max(rect.width, 320)}px;
+      max-height:360px;
+      overflow-y:auto;
+      display:block;
+    `;
+  },
+
+  _highlight(label, trigger) {
+    const idx = label.toLowerCase().indexOf(trigger.toLowerCase());
+    if (idx === -1) return label;
+    return label.slice(0, idx) +
+      `<mark style="background:var(--ac-d);color:var(--ac);border-radius:2px">${label.slice(idx, idx+trigger.length)}</mark>` +
+      label.slice(idx + trigger.length);
+  },
+
+  move(dir) {
+    this.selected = Math.max(0, Math.min(this.items.length-1, this.selected + dir));
+    const popup = document.getElementById('ac-popup');
+    popup?.querySelectorAll('.ac-item').forEach((el,i) => el.classList.toggle('ac-selected', i===this.selected));
+    popup?.querySelector('.ac-selected')?.scrollIntoView({block:'nearest'});
+  },
+
+  confirm() {
+    const item = this.items[this.selected];
+    if (!item) { this.hide(); return; }
+    const inp = document.getElementById('msg-input');
+    const val = inp.value;
+    const before = val.slice(0, this._triggerStart);
+    const after  = val.slice(this._triggerStart + this._trigger.length);
+    inp.value = before + item.insert + after;
+    // Move cursor to after the insert
+    const newPos = this._triggerStart + item.insert.length;
+    inp.setSelectionRange(newPos, newPos);
+    inp.focus();
+    inp.style.height = 'auto';
+    inp.style.height = Math.min(inp.scrollHeight, 160) + 'px';
+
+    // Also add char/org tag to bar if it's a char
+    if (item.type === 'char') {
+      const c = S.ci.get(item.id) || S.chars.find(x => x.id === item.id);
+      if (c && !S.activeChars.find(x => x.id === c.id)) RP.toggleChar(c);
+    }
+
+    this.hide();
+  },
+
+  hide() {
+    this.visible  = false;
+    this.items    = [];
+    this.selected = -1;
+    const popup = document.getElementById('ac-popup');
+    if (popup) popup.style.display = 'none';
+  },
+};
+
+// Inject autocomplete CSS
+const AC_CSS = `
+.ac-popup{
+  background:var(--bg2);border:1px solid var(--ln2);border-radius:8px;
+  box-shadow:0 -8px 32px rgba(0,0,0,.5);z-index:600;
+  padding:4px 0;
+}
+.ac-item{
+  display:flex;align-items:center;gap:10px;padding:8px 12px;
+  cursor:pointer;transition:background .1s;
+}
+.ac-item:hover,.ac-item.ac-selected{background:var(--bg3)}
+.ac-ava{
+  width:28px;height:28px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;overflow:hidden;
+}
+.ac-info{flex:1;min-width:0}
+.ac-label{font-size:13px;font-weight:500;color:var(--t0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ac-sub{font-family:var(--mono);font-size:10px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ac-type-badge{
+  font-family:var(--mono);font-size:9px;font-weight:600;
+  padding:1px 6px;border-radius:2px;border:1px solid;
+  text-transform:uppercase;letter-spacing:.06em;flex-shrink:0;
+}
+`;
+
+(function injectAC() {
+  const s = document.createElement('style');
+  s.textContent = AC_CSS;
+  document.head.appendChild(s);
+})();
+
+// Additional CSS for archive rooms + attach preview + ctx-menu (if not in main)
+const EXTRA_CSS = `
+.archived-room .room-name{font-style:italic}
+.ctx-menu{background:var(--bg2);border:1px solid var(--ln2);border-radius:6px;padding:4px 0;min-width:180px;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+.ctx-item{display:flex;align-items:center;gap:8px;padding:7px 14px;font-size:13px;color:var(--t1);cursor:pointer;transition:background .1s}
+.ctx-item:hover{background:var(--bg3);color:var(--t0)}
+.ctx-item i{width:14px;text-align:center;font-size:12px;color:var(--t2)}
+.ctx-item:hover i{color:var(--t0)}
+.ctx-item.danger{color:var(--rd)}.ctx-item.danger i{color:var(--rd)}.ctx-item.danger:hover{background:var(--rd-d)}
+.ctx-sep{height:1px;background:var(--ln);margin:3px 0}
+`;
+(function injectExtra() {
+  const s = document.createElement('style');
+  s.textContent = EXTRA_CSS;
+  document.head.appendChild(s);
+})();
