@@ -532,7 +532,7 @@ const SUPA_URL='https://vhzroetspwbwmouqkcxe.supabase.co';
 const SUPA_KEY='sb_publishable_kM788c6s2-mOyndFnIdc1A_EKPSIz8J';
 const GEM_KEY='AIzaSyB-CAxFb8WeRmQmmXCChK3HxNedndq2Sf0';
 const GEM_MDL='gemini-1.5-flash';
-const ADM_PASS='nyc_observer_2026';
+const ADM_PASS='1';
 const DB_TO=6000;
 const EMOJIS=['👍','❤️','😂','😮','😢','🔥','⚔️','💀','🎯','🤝','👀','💬'];
 const USERS=[
@@ -655,14 +655,17 @@ const RP={
     ];
   },
   async switchRoom(id){
-    S.roomId=id;S.typing={};
+    S.roomId=id;S.typing={};RT.lastId=null;
     const room=S.rooms.find(r=>r.id==id);
     if(room){document.getElementById('room-title').textContent=room.name;document.getElementById('room-desc').textContent=room.description||'';}
     document.querySelectorAll('.room-item').forEach(el=>el.classList.toggle('active',el.dataset.id==id));
-    UI.renderRoom(id);
+    // Show cached immediately if available (instant render)
+    if(S.msgs[id]&&S.msgs[id].length){UI.renderRoom(id);}
+    else{UI.renderRoom(id);} // shows empty state
+    // Always fetch fresh from DB
     if(!S._off){
       try{
-        const rows=await DB.get(`rp_messages?room_id=eq.${id}&is_deleted=eq.false&order=created_at.asc&limit=120`);
+        const rows=await DB.get(`rp_messages?room_id=eq.${id}&is_deleted=eq.false&order=created_at.asc&limit=500`);
         S.msgs[id]=rows;
         RT.lastId=rows.length?rows[rows.length-1].id:null;
         UI.renderRoom(id);
@@ -765,13 +768,84 @@ const RP={
     const name=document.getElementById('new-room-name').value.trim().toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'');
     const desc=document.getElementById('new-room-desc').value.trim();
     if(!name){toast('Oda adı gerekli','error');return;}
-    const nr={slug:name,name,description:desc,sort_order:S.rooms.length,is_live:false};
+    const nr={slug:name,name,description:desc,sort_order:S.rooms.length,is_live:false,is_archived:false};
     if(!S._off){
       try{const r=await DB.post('rp_rooms',nr);S.rooms.push(r[0]||{...nr,id:'l'+Date.now()});}
       catch(e){toast('Oluşturulamadı','error');return;}
     }else S.rooms.push({...nr,id:'l'+Date.now(),created_at:new Date().toISOString()});
     CM('m-room');document.getElementById('new-room-name').value='';document.getElementById('new-room-desc').value='';
-    UI.renderRooms();RP.switchRoom(S.rooms[S.rooms.length-1].id);
+    UI.renderRooms();RP.switchRoom(S.rooms.filter(r=>!r.is_archived)[S.rooms.filter(r=>!r.is_archived).length-1].id);
+  },
+
+  // Copy room + all its messages to a new archive room
+  async copyRoom(roomId){
+    const room=S.rooms.find(r=>r.id==roomId);if(!room)return;
+    const archiveName=room.name+'-arşiv-'+new Date().toLocaleDateString('tr-TR').replace(/\./g,'-');
+    if(!confirm(`"${room.name}" odasını "${archiveName}" adıyla kopyala?`))return;
+    toast('Kopyalanıyor…','');
+    try{
+      // 1. Create new room
+      const newRoomRows=await DB.post('rp_rooms',{
+        slug:archiveName.toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,''),
+        name:archiveName,
+        description:`${room.name} odasının arşiv kopyası — ${new Date().toLocaleDateString('tr-TR')}`,
+        sort_order:S.rooms.length,is_live:false,is_archived:true
+      });
+      const newRoom=newRoomRows[0];if(!newRoom){toast('Oda oluşturulamadı','error');return;}
+      // 2. Fetch all messages from source room
+      const msgs=await DB.get(`rp_messages?room_id=eq.${roomId}&is_deleted=eq.false&order=created_at.asc&limit=2000`);
+      // 3. Copy messages in batches
+      let copied=0;
+      for(const msg of msgs){
+        await DB.post('rp_messages',{
+          room_id:newRoom.id,char_id:msg.char_id,char_name:msg.char_name,
+          char_alias:msg.char_alias||'',char_avatar:msg.char_avatar||'',
+          org_id:msg.org_id||null,org_name:msg.org_name||null,org_color:msg.org_color||null,
+          content:msg.content,attachment_url:msg.attachment_url||null,
+          reactions:msg.reactions||{},is_edited:msg.is_edited||false,
+          reply_to_id:null,reply_to_sender:null,reply_to_content:null,
+          sent_by_user:msg.sent_by_user||null,
+        }).catch(()=>{});
+        copied++;
+      }
+      S.rooms.push({...newRoom});
+      UI.renderRooms();
+      toast(`✓ ${copied} mesaj kopyalandı → "${archiveName}"`, 'success');
+    }catch(e){toast('Kopyalama hatası: '+e.message,'error');}
+  },
+
+  async toggleArchive(roomId,archive){
+    const room=S.rooms.find(r=>r.id==roomId);if(!room)return;
+    if(!S._off)try{await DB.patch('rp_rooms',`id=eq.${roomId}`,{is_archived:archive});}catch(e){toast('Güncelleme hatası','error');return;}
+    room.is_archived=archive;
+    UI.renderRooms();
+    toast(archive?'Arşive alındı':'Arşivden çıkarıldı','success');
+    if(archive&&S.roomId==roomId){
+      const first=S.rooms.find(r=>!r.is_archived);
+      if(first)RP.switchRoom(first.id);
+    }
+  },
+
+  async renameRoom(roomId,oldName){
+    const newName=prompt('Yeni oda adı:',oldName);
+    if(!newName||newName===oldName)return;
+    const slug=newName.toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'');
+    if(!S._off)try{await DB.patch('rp_rooms',`id=eq.${roomId}`,{name:newName,slug});}catch(e){toast('Güncelleme hatası','error');return;}
+    const room=S.rooms.find(r=>r.id==roomId);if(room){room.name=newName;room.slug=slug;}
+    UI.renderRooms();
+    if(S.roomId==roomId)document.getElementById('room-title').textContent=newName;
+    toast('Oda adı güncellendi','success');
+  },
+
+  async deleteRoom(roomId){
+    const room=S.rooms.find(r=>r.id==roomId);if(!room)return;
+    if(!confirm(`"${room.name}" odasını kalıcı olarak sil? Tüm mesajlar gider!`))return;
+    if(!S._off)try{await DB.patch('rp_rooms',`id=eq.${roomId}`,{is_archived:true});}catch(e){}
+    S.rooms=S.rooms.filter(r=>r.id!=roomId);
+    delete S.msgs[roomId];
+    UI.renderRooms();
+    if(S.roomId==roomId){const first=S.rooms.find(r=>!r.is_archived);if(first)RP.switchRoom(first.id);}
+    toast('Oda silindi','success');
   },
   /* chars */
   toggleChar(c){
@@ -841,8 +915,43 @@ const RP={
     const ia=document.getElementById('input-area');ia.style.position='relative';ia.appendChild(w);
     document.addEventListener('click',()=>w.remove(),{once:true});
   },
-  promptAttach(){document.getElementById('attach-url').value='';OM('m-attach');},
-  confirmAttach(){const url=document.getElementById('attach-url').value.trim();if(!url)return;S.attach=url;CM('m-attach');toast('Resim eklendi ✓','success');},
+  promptAttach(){
+    // Show inline image URL input below toolbar
+    let bar=document.getElementById('attach-inline-bar');
+    if(bar){bar.remove();return;}
+    bar=document.createElement('div');
+    bar.id='attach-inline-bar';
+    bar.style.cssText='display:flex;align-items:center;gap:8px;padding:0 12px 8px';
+    bar.innerHTML=`
+      <i class="fas fa-image" style="color:var(--t2);font-size:13px;flex-shrink:0"></i>
+      <input id="attach-inline-input" type="text" placeholder="Resim URL'si yapıştır…"
+        style="flex:1;background:var(--bg3);border:1px solid var(--ln2);border-radius:var(--r);color:var(--t0);font-family:var(--sans);font-size:12px;padding:5px 8px;outline:none"
+        onkeydown="if(event.key==='Enter'){RP._confirmAttachInline();}if(event.key==='Escape'){document.getElementById('attach-inline-bar')?.remove();}"
+      >
+      <button onclick="RP._confirmAttachInline()" style="padding:5px 10px;background:var(--ac);color:#fff;border:none;border-radius:var(--r);font-family:var(--mono);font-size:10px;cursor:pointer">Ekle</button>
+      <button onclick="document.getElementById('attach-inline-bar')?.remove()" style="padding:5px 8px;background:var(--bg4);color:var(--t2);border:none;border-radius:var(--r);cursor:pointer;font-size:12px">✕</button>`;
+    const toolbar=document.getElementById('input-toolbar');
+    toolbar.parentNode.insertBefore(bar,toolbar);
+    setTimeout(()=>document.getElementById('attach-inline-input')?.focus(),50);
+    // If user already has a URL in clipboard, paste it
+    navigator.clipboard?.readText?.().then(t=>{if(t&&(t.startsWith('http')||t.startsWith('/')))document.getElementById('attach-inline-input').value=t;}).catch(()=>{});
+  },
+  _confirmAttachInline(){
+    const url=(document.getElementById('attach-inline-input')?.value||'').trim();
+    if(!url){toast('URL gir','warn');return;}
+    S.attach=url;
+    document.getElementById('attach-inline-bar')?.remove();
+    // Show preview chip in char tags bar
+    const bar=document.getElementById('char-tags-bar');
+    document.getElementById('attach-preview-tag')?.remove();
+    const prev=document.createElement('div');
+    prev.id='attach-preview-tag';
+    prev.style.cssText='display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:20px;border:1px solid rgba(77,184,128,.4);background:var(--gn-d);color:var(--gn);font-family:var(--mono);font-size:10px';
+    prev.innerHTML=`<i class="fas fa-image" style="font-size:9px"></i><span>resim eklendi</span><span style="cursor:pointer;opacity:.7" onclick="S.attach=null;this.parentNode.remove()">✕</span>`;
+    bar.insertBefore(prev,bar.querySelector('#add-char-btn'));
+    toast('Resim eklendi','success');
+  },
+  confirmAttach(){this._confirmAttachInline();},
   _org(id){return id?S.oi.get(id)||null:null;}
 };
 
@@ -893,12 +1002,51 @@ const RT={
 const UI={
   renderRooms(){
     const list=document.getElementById('room-list');list.innerHTML='';
-    S.rooms.forEach(room=>{
-      const el=document.createElement('div');el.className='room-item'+(room.id==S.roomId?' active':'');el.dataset.id=room.id;
-      el.innerHTML=`<span class="room-hash">#</span><span class="room-name">${room.name}</span>${room.is_live?'<span class="room-live">LIVE</span>':''}`;
-      el.onclick=()=>{RP.switchRoom(room.id);document.getElementById('sidebar').classList.remove('open');document.getElementById('sb-overlay').classList.remove('show');};
-      list.appendChild(el);
+    const active=S.rooms.filter(r=>!r.is_archived);
+    const archived=S.rooms.filter(r=>r.is_archived);
+    active.forEach(room=>this._renderRoomItem(list,room));
+    if(archived.length){
+      const archLbl=document.createElement('div');
+      archLbl.className='nav-lbl';
+      archLbl.style.marginTop='8px';
+      archLbl.innerHTML='<i class="fas fa-archive" style="margin-right:4px"></i>Arşiv';
+      list.appendChild(archLbl);
+      archived.forEach(room=>this._renderRoomItem(list,room,true));
+    }
+  },
+  _renderRoomItem(list,room,isArchived=false){
+    const el=document.createElement('div');
+    el.className='room-item'+(room.id==S.roomId?' active':'')+(isArchived?' archived-room':'');
+    el.dataset.id=room.id;
+    el.innerHTML=`<span class="room-hash">${isArchived?'🗄':'#'}</span>
+      <span class="room-name" style="${isArchived?'color:var(--t3)':''}">${room.name}</span>
+      ${room.is_live?'<span class="room-live">LIVE</span>':''}`;
+    el.onclick=()=>{RP.switchRoom(room.id);document.getElementById('sidebar').classList.remove('open');document.getElementById('sb-overlay').classList.remove('show');};
+    // Right-click context menu
+    el.addEventListener('contextmenu',e=>{
+      e.preventDefault();
+      const menuItems=[
+        {icon:'fa-copy',label:'Odayı Kopyala (Arşiv)',action:()=>RP.copyRoom(room.id)},
+        {icon:'fa-archive',label:isArchived?'Arşivden Çıkar':'Arşive Al',action:()=>RP.toggleArchive(room.id,!isArchived)},
+        'sep',
+        {icon:'fa-edit',label:'Yeniden Adlandır',action:()=>RP.renameRoom(room.id,room.name)},
+        {icon:'fa-trash',label:'Odayı Sil',action:()=>RP.deleteRoom(room.id),danger:true},
+      ];
+      // Mini inline context menu
+      const menu=document.createElement('div');
+      menu.className='ctx-menu';
+      menu.style.cssText=`position:fixed;left:${Math.min(e.clientX,window.innerWidth-180)}px;top:${e.clientY}px;z-index:500`;
+      menuItems.forEach(item=>{
+        if(item==='sep'){const s=document.createElement('div');s.className='ctx-sep';menu.appendChild(s);return;}
+        const mi=document.createElement('div');mi.className='ctx-item'+(item.danger?' danger':'');
+        mi.innerHTML=`<i class="fas ${item.icon}"></i>${item.label}`;
+        mi.onclick=()=>{menu.remove();item.action();};
+        menu.appendChild(mi);
+      });
+      document.body.appendChild(menu);
+      setTimeout(()=>document.addEventListener('click',()=>menu.remove(),{once:true}),50);
     });
+    list.appendChild(el);
   },
   renderRoom(id){
     const list=document.getElementById('messages-list');
@@ -1249,15 +1397,44 @@ const Adm={
 /* ═══ EVENT WIRING ═══════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded',()=>{
   const inp=document.getElementById('msg-input');
-  inp.addEventListener('input',()=>{inp.style.height='auto';inp.style.height=Math.min(inp.scrollHeight,160)+'px';RP.sendTyping();});
-  inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();RP.send();}if(e.key==='Escape')RP.clearReply();});
+
+  // Paste: catch image paste, suggest URL mode
+  inp.addEventListener('paste',e=>{
+    const items=e.clipboardData?.items||[];
+    for(const item of items){
+      if(item.type.startsWith('image/')){
+        e.preventDefault();
+        toast('Direkt resim yapıştırma yok — 📎 butonunu kullan veya URL yapıştır','warn');
+        return;
+      }
+    }
+  });
+
+  inp.addEventListener('input',()=>{
+    inp.style.height='auto';
+    inp.style.height=Math.min(inp.scrollHeight,160)+'px';
+    RP.sendTyping();
+    if(typeof Autocomplete!=='undefined') Autocomplete.check(inp);
+  });
+
+  inp.addEventListener('keydown',e=>{
+    if(typeof Autocomplete!=='undefined'&&Autocomplete.visible){
+      if(e.key==='ArrowDown'){e.preventDefault();Autocomplete.move(1);return;}
+      if(e.key==='ArrowUp'){e.preventDefault();Autocomplete.move(-1);return;}
+      if((e.key==='Enter'||e.key==='Tab')&&!e.shiftKey){e.preventDefault();Autocomplete.confirm();return;}
+      if(e.key==='Escape'){Autocomplete.hide();return;}
+    }
+    if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();RP.send();}
+    if(e.key==='Escape')RP.clearReply();
+  });
+
   document.querySelectorAll('.mbd').forEach(el=>el.addEventListener('click',e=>{if(e.target===el)el.classList.add('hidden');}));
   document.getElementById('mob-menu')?.addEventListener('click',()=>{document.getElementById('sidebar').classList.toggle('open');document.getElementById('sb-overlay').classList.toggle('show');});
   document.getElementById('sb-overlay')?.addEventListener('click',()=>{document.getElementById('sidebar').classList.remove('open');document.getElementById('sb-overlay').classList.remove('show');});
   document.getElementById('btn-new-room')?.addEventListener('click',()=>OM('m-room'));
   document.getElementById('btn-mem')?.addEventListener('click',()=>{const p=document.getElementById('members-panel');p.style.display=p.style.display==='none'?'':'none';});
   document.getElementById('char-sel-btn')?.addEventListener('click',()=>RP.openPicker());
-  document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.mbd').forEach(el=>el.classList.add('hidden'));});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.mbd').forEach(el=>el.classList.add('hidden'));if(typeof Autocomplete!=='undefined')Autocomplete.hide();}});
   Login.init();
 });
 </script>
