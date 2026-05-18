@@ -563,7 +563,13 @@ const DB={
   },
   async get(p){const r=await this._f(`${SUPA_URL}/rest/v1/${p}`,{headers:SH});if(!r.ok)throw new Error(await r.text());return r.json();},
   async post(t,b){const r=await this._f(`${SUPA_URL}/rest/v1/${t}`,{method:'POST',headers:SH,body:JSON.stringify(b)});if(!r.ok)throw new Error(await r.text());return r.json();},
-  async patch(t,q,b){const r=await this._f(`${SUPA_URL}/rest/v1/${t}?${q}`,{method:'PATCH',headers:SH,body:JSON.stringify(b)});if(!r.ok)throw new Error(await r.text());return r.json();}
+  async patch(t,q,b){const r=await this._f(`${SUPA_URL}/rest/v1/${t}?${q}`,{method:'PATCH',headers:SH,body:JSON.stringify(b)});if(!r.ok)throw new Error(await r.text());return r.json();},
+  async upsert(t,onConflict,b){
+    const h={...SH,'Prefer':'resolution=merge-duplicates,return=representation'};
+    const r=await this._f(`${SUPA_URL}/rest/v1/${t}?on_conflict=${onConflict}`,{method:'POST',headers:h,body:JSON.stringify(b)});
+    if(!r.ok)throw new Error(await r.text());
+    return r.json();
+  }
 };
 
 /* ═══ STATE ═════════════════════════════════════════════ */
@@ -895,17 +901,17 @@ const RP={
   sendTyping(){
     if(!S.activeChar||S._off)return;
     clearTimeout(S._tt);
-    DB.post('rp_presence',{char_id:S.activeChar.id,char_name:S.activeChar.name,char_alias:S.activeChar.alias||'',org_id:(S.activeChar.organizations||[])[0]||S.activeChar.organization||null,last_seen:new Date().toISOString(),is_typing:true,room_id:S.roomId}).catch(()=>{});
+    DB.upsert('rp_presence','char_id',{char_id:S.activeChar.id,char_name:S.activeChar.name,char_alias:S.activeChar.alias||'',org_id:(S.activeChar.organizations||[])[0]||S.activeChar.organization||null,last_seen:new Date().toISOString(),is_typing:true,room_id:S.roomId}).catch(()=>{});
     S._tt=setTimeout(()=>RP.clearTyping(),4000);
   },
   clearTyping(){
     clearTimeout(S._tt);
     if(!S.activeChar||S._off)return;
-    DB.post('rp_presence',{char_id:S.activeChar.id,char_name:S.activeChar.name,char_alias:S.activeChar.alias||'',org_id:(S.activeChar.organizations||[])[0]||S.activeChar.organization||null,last_seen:new Date().toISOString(),is_typing:false,room_id:S.roomId}).catch(()=>{});
+    DB.upsert('rp_presence','char_id',{char_id:S.activeChar.id,char_name:S.activeChar.name,char_alias:S.activeChar.alias||'',org_id:(S.activeChar.organizations||[])[0]||S.activeChar.organization||null,last_seen:new Date().toISOString(),is_typing:false,room_id:S.roomId}).catch(()=>{});
   },
   _hb(){
     if(!S.activeChar||S._off)return;
-    DB.post('rp_presence',{char_id:S.activeChar.id,char_name:S.activeChar.name,char_alias:S.activeChar.alias||'',org_id:(S.activeChar.organizations||[])[0]||S.activeChar.organization||null,last_seen:new Date().toISOString(),is_typing:false,room_id:S.roomId}).catch(()=>{});
+    DB.upsert('rp_presence','char_id',{char_id:S.activeChar.id,char_name:S.activeChar.name,char_alias:S.activeChar.alias||'',org_id:(S.activeChar.organizations||[])[0]||S.activeChar.organization||null,last_seen:new Date().toISOString(),is_typing:false,room_id:S.roomId}).catch(()=>{});
   },
   /* misc */
   toggleEmoji(e){
