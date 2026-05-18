@@ -2149,6 +2149,9 @@ Login._start=async function(u){
   await PlayerProfile.loadAll();
   // Init notifications
   Notif.init();
+  // Inject DM pill after RP view renders
+  setTimeout(()=>window.injectDMPill?.(), 200);
+  setTimeout(()=>window.injectDMPill?.(), 800);
   // Player presence heartbeat — fires every 10s so others see us online quickly
   const sendPlayerHB=()=>{
     if(!S.user||S._off)return;
