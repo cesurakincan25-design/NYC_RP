@@ -336,8 +336,15 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 @media(max-width:768px){
   #sidebar{position:fixed;left:0;top:0;bottom:0;transform:translateX(-100%);z-index:50}
   #sidebar.open{transform:translateX(0)}
-  #members-panel,#adm-grid .adm-panel:first-child,#adm-grid .adm-panel:last-child{display:none}
+  #adm-grid .adm-panel:first-child,#adm-grid .adm-panel:last-child{display:none}
   #mob-menu{display:flex!important}
+  #members-panel{
+    position:fixed;right:0;top:var(--hh);bottom:0;
+    transform:translateX(100%);transition:transform var(--tr);
+    z-index:30;border-left:1px solid var(--ln2);
+    box-shadow:-4px 0 16px rgba(0,0,0,.4);
+  }
+  #members-panel.open{transform:translateX(0)}
   .user-grid{grid-template-columns:repeat(2,1fr)}
 }
 #mob-menu{display:none}
@@ -533,7 +540,7 @@ const SUPA_KEY='sb_publishable_kM788c6s2-mOyndFnIdc1A_EKPSIz8J';
 const GEM_KEY='AIzaSyB-CAxFb8WeRmQmmXCChK3HxNedndq2Sf0';
 const GEM_MDL='gemini-1.5-flash';
 const ADM_PASS='1';
-const DB_TO=6000;
+const DB_TO=8000;
 const EMOJIS=['👍','❤️','😂','😮','😢','🔥','⚔️','💀','🎯','🤝','👀','💬'];
 const USERS=[
   {id:'eren', name:'Eren', role:'Admin',color:'#4a8fe2'},
@@ -651,8 +658,8 @@ const RP={
     if(live)await RP.switchRoom(live.id);
     document.getElementById('view-rp').classList.add('active');
     document.getElementById('loader').classList.add('hidden');
-    setInterval(()=>RP._hb(),30000);
-    setInterval(()=>RT._presence(),8000);
+    setInterval(()=>RP._hb(),15000);
+    setInterval(()=>RT._presence(),3000);
   },
   _dfRooms(){
     S.rooms=[
@@ -967,7 +974,7 @@ const RT={
   lastId:null,ws:null,pt:null,
   connect(roomId){
     this.disconnect();
-    this.pt=setInterval(()=>this._poll(roomId),4000);
+    this.pt=setInterval(()=>this._poll(roomId),1500);
     try{
       const ws=new WebSocket(SUPA_URL.replace('https://','wss://')+'/realtime/v1/websocket?apikey='+SUPA_KEY+'&vsn=1.0.0');
       this.ws=ws;
@@ -987,11 +994,16 @@ const RT={
   async _presence(){
     if(S._off)return;
     try{
-      const cut=new Date(Date.now()-120000).toISOString();
-      const rows=await DB.get(`rp_presence?last_seen=gte.${cut}&select=char_id,char_name,char_alias,org_id,last_seen,is_typing,room_id`);
-      S.presence={};rows.forEach(r=>{S.presence[r.char_id]=r;});
-      S.typing={};rows.filter(r=>r.is_typing&&r.room_id==S.roomId&&r.char_id!==S.activeChar?.id).forEach(r=>{S.typing[r.char_id]={name:r.char_name};});
-      UI.renderMembers();UI.renderTyping();
+      const cut=new Date(Date.now()-60000).toISOString(); // 1 dakika (daha kısa window)
+      const rows=await DB.get(`rp_presence?last_seen=gte.${cut}&select=char_id,char_name,char_alias,org_id,last_seen,is_typing,room_id,reader_user_id`);
+      S.presence={};
+      rows.forEach(r=>{S.presence[r.char_id]=r;});
+      // Typing users in current room
+      S.typing={};
+      rows.filter(r=>r.is_typing&&r.room_id==S.roomId&&r.char_id!==S.activeChar?.id)
+          .forEach(r=>{S.typing[r.char_id]={name:r.char_name};});
+      UI.renderMembers();
+      UI.renderTyping();
     }catch(e){}
   },
   _handleMsg(rec){
@@ -1188,29 +1200,31 @@ const UI={
   },
   renderMembers(){
     const list=document.getElementById('members-list');
-    // Show PLAYERS (from USERS), not characters
-    // Online = player has presence within last 2 min
     const now=Date.now();
+    // Build set of online user IDs from presence (last 60s)
     const onlineUserIds=new Set();
     Object.values(S.presence).forEach(p=>{
-      if(p.last_seen&&(now-new Date(p.last_seen).getTime())<120000){
-        onlineUserIds.add(p.reader_user_id||p.sent_by_user||p.char_id);
-      }
+      if(!p.last_seen) return;
+      const age=now-new Date(p.last_seen).getTime();
+      if(age>60000) return;
+      // reader_user_id is the player id we heartbeat with
+      if(p.reader_user_id) onlineUserIds.add(p.reader_user_id);
     });
-    // Also mark current user as online
-    if(S.user)onlineUserIds.add(S.user.id);
+    // Always show self as online
+    if(S.user) onlineUserIds.add(S.user.id);
     const allUsers=USERS||[];
     document.getElementById('mem-cnt').textContent=onlineUserIds.size;
     list.innerHTML='';
-    // Online players
     const onlinePlayers=allUsers.filter(u=>onlineUserIds.has(u.id));
     const offlinePlayers=allUsers.filter(u=>!onlineUserIds.has(u.id));
     if(onlinePlayers.length){
-      const sec=document.createElement('div');sec.className='mem-sec';sec.textContent=`Çevrimiçi — ${onlinePlayers.length}`;list.appendChild(sec);
+      const sec=document.createElement('div');sec.className='mem-sec';
+      sec.textContent=`Çevrimiçi — ${onlinePlayers.length}`;list.appendChild(sec);
       onlinePlayers.forEach(u=>this._renderPlayerItem(list,u,true));
     }
     if(offlinePlayers.length){
-      const sec=document.createElement('div');sec.className='mem-sec';sec.style.marginTop='8px';sec.textContent='Çevrimdışı';list.appendChild(sec);
+      const sec=document.createElement('div');sec.className='mem-sec';
+      sec.style.marginTop='8px';sec.textContent='Çevrimdışı';list.appendChild(sec);
       offlinePlayers.forEach(u=>this._renderPlayerItem(list,u,false));
     }
   },
@@ -1529,7 +1543,21 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('mob-menu')?.addEventListener('click',()=>{document.getElementById('sidebar').classList.toggle('open');document.getElementById('sb-overlay').classList.toggle('show');});
   document.getElementById('sb-overlay')?.addEventListener('click',()=>{document.getElementById('sidebar').classList.remove('open');document.getElementById('sb-overlay').classList.remove('show');});
   document.getElementById('btn-new-room')?.addEventListener('click',()=>OM('m-room'));
-  document.getElementById('btn-mem')?.addEventListener('click',()=>{const p=document.getElementById('members-panel');p.style.display=p.style.display==='none'?'':'none';});
+  document.getElementById('btn-mem')?.addEventListener('click',()=>{
+    const p=document.getElementById('members-panel');
+    const isMobile=window.innerWidth<=768;
+    if(isMobile){
+      p.classList.toggle('open');
+      // Close on outside click
+      if(p.classList.contains('open')){
+        setTimeout(()=>document.addEventListener('click',function h(e){
+          if(!p.contains(e.target)&&e.target.id!=='btn-mem'){p.classList.remove('open');document.removeEventListener('click',h);}
+        }),100);
+      }
+    }else{
+      p.style.display=p.style.display==='none'?'':'none';
+    }
+  });
   document.getElementById('char-sel-btn')?.addEventListener('click',()=>RP.openPicker());
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.mbd').forEach(el=>el.classList.add('hidden'));if(typeof Autocomplete!=='undefined')Autocomplete.hide();}});
   Login.init();
@@ -1722,7 +1750,7 @@ const PM={
     win.style.display='flex';
     this._loadMessages(convId);
     clearInterval(this._pollTimer);
-    this._pollTimer=setInterval(()=>this._pollMessages(convId),3000);
+    this._pollTimer=setInterval(()=>this._pollMessages(convId),1000);
     setTimeout(()=>document.getElementById('pm-input')?.focus(),100);
   },
 
@@ -1809,19 +1837,21 @@ const _origLoginStart=Login._start.bind(Login);
 Login._start=async function(u){
   _origLoginStart(u);
   await PlayerProfile.loadAll();
-  // Also start presence heartbeat for the logged-in player
-  setInterval(()=>{
-    if(S.user&&!S._off){
-      DB.upsert('rp_presence','char_id',{
-        char_id:'player_'+S.user.id,
-        char_name:S.user.name,
-        char_alias:'',org_id:null,
-        last_seen:new Date().toISOString(),
-        is_typing:false,room_id:S.roomId,
-        reader_user_id:S.user.id
-      }).catch(()=>{});
-    }
-  },20000);
+  // Player presence heartbeat — fires every 10s so others see us online quickly
+  const sendPlayerHB=()=>{
+    if(!S.user||S._off)return;
+    DB.upsert('rp_presence','char_id',{
+      char_id:'player_hb_'+S.user.id,
+      char_name:S.user.name,
+      char_alias:'',org_id:null,
+      last_seen:new Date().toISOString(),
+      is_typing:false,
+      room_id:S.roomId||null,
+      reader_user_id:S.user.id,
+    }).catch(()=>{});
+  };
+  sendPlayerHB(); // immediate on login
+  setInterval(sendPlayerHB,10000);
 };
 </script>
 
