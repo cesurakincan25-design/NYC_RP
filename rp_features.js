@@ -241,10 +241,42 @@ const TagSystem = {
   save() { localStorage.setItem('rp_active_tags', JSON.stringify(this.active)); },
 
   add(type, id, label, color, data = {}) {
-    if (this.active.find(t => t.type === type && t.id === id)) return;
-    this.active.push({ type, id, label, color, data });
-    this.save();
-    this.render();
+    if (type === 'char') {
+      // Chars: add to active list for tag bar display
+      if (this.active.find(t => t.type === type && t.id === id)) return;
+      this.active.push({ type, id, label, color, data });
+      this.save();
+      this.render();
+    } else {
+      // Non-chars: insert as text tag into message input
+      this._insertIntoInput(type, label, data);
+    }
+  },
+
+  // Insert [Type: Label] into message input at cursor
+  _insertIntoInput(type, label, data) {
+    const inp = document.getElementById('msg-input');
+    if (!inp) return;
+    const typeLabels = {
+      org:     'Org',
+      vehicle: 'Araç',
+      equip:   'Ekipman',
+      prop:    'Mülk',
+    };
+    // Build tag text: [Araç: Ferrari 488 - 34 ABC 123]
+    let tagText = `[${typeLabels[type]||type}: ${label}`;
+    if (type === 'vehicle' && data.plate && data.plate !== label) tagText += ` (${data.plate})`;
+    tagText += '] ';
+
+    const start = inp.selectionStart || inp.value.length;
+    const end   = inp.selectionEnd   || inp.value.length;
+    inp.value = inp.value.slice(0, start) + tagText + inp.value.slice(end);
+    const newPos = start + tagText.length;
+    inp.setSelectionRange(newPos, newPos);
+    inp.focus();
+    inp.style.height = 'auto';
+    inp.style.height = Math.min(inp.scrollHeight, 160) + 'px';
+    toast(`"${label}" mesaja eklendi`, 'success');
   },
 
   remove(type, id) {
@@ -255,32 +287,16 @@ const TagSystem = {
 
   clear() { this.active = []; this.save(); this.render(); },
 
-  // Injects the non-char tags AFTER the char tags rendered by UI.renderTags()
+  // Renders ONLY char tags in tag bar + add buttons
   render() {
     const bar = document.getElementById('char-tags-bar');
     if (!bar) return;
-    // Remove old non-char tags (keep char tags rendered by UI.renderTags)
-    bar.querySelectorAll('.ntag').forEach(el => el.remove());
-    // Remove old add-char-btn (will be re-added)
-    bar.querySelector('#add-char-btn')?.remove();
-    bar.querySelector('#add-tag-btn')?.remove();
+    // Remove old non-char tags and buttons
+    bar.querySelectorAll('.ntag, #add-char-btn, #add-tag-btn').forEach(el => el.remove());
 
-    this.active.forEach(tag => {
-      if (tag.type === 'char') return; // chars handled by UI.renderTags
-      const el = document.createElement('div');
-      el.className = 'ctag ntag';
-      el.style.cssText = `background:${tag.color}18;border-color:${tag.color}44;color:${tag.color};`;
-      el.title = `${tag.label} · ${tag.type}`;
-      const typeIcon = this.TYPES.find(t => t.key === tag.type)?.icon || 'fa-tag';
-      el.innerHTML = `
-        <div class="ctag-ava"><i class="fas ${typeIcon}" style="font-size:9px"></i></div>
-        <span class="ctag-name">${tag.label}</span>
-        <span class="ctag-rm">✕</span>`;
-      el.addEventListener('contextmenu', e => { e.preventDefault(); TagSystem._tagContextMenu(tag, e); });
-      el.querySelector('.ctag-rm').addEventListener('click', e => {
-        e.stopPropagation(); this.remove(tag.type, tag.id);
-      });
-      bar.appendChild(el);
+    // Only char-type tags stay in bar
+    this.active.filter(t => t.type === 'char').forEach(tag => {
+      // Already rendered by UI.renderTags, just ensure context menu
     });
 
     // + karakter btn
@@ -290,7 +306,7 @@ const TagSystem = {
     addChar.onclick = () => CharPicker.open();
     bar.appendChild(addChar);
 
-    // + tag btn
+    // + etiket btn (araç/mülk/ekipman/org → mesaja ekler)
     const addTag = document.createElement('button');
     addTag.id = 'add-tag-btn';
     addTag.innerHTML = '<i class="fas fa-tag"></i> etiket';
@@ -359,7 +375,7 @@ const TagSystem = {
 
   _renderTagGrid() {
     const g = document.getElementById('tp-grid'); if (!g) return;
-    const search   = document.getElementById('tp-search')?.value.trim().toLowerCase() || '';
+    const search    = document.getElementById('tp-search')?.value.trim().toLowerCase() || '';
     const typeFilter = document.getElementById('tp-type-filter')?.value || 'all';
     g.innerHTML = '';
 
@@ -367,35 +383,67 @@ const TagSystem = {
       ? this.TYPES.filter(t => t.key !== 'char')
       : this.TYPES.filter(t => t.key === typeFilter);
 
+    let totalShown = 0;
     types.forEach(type => {
       const items = type.getter();
-      items
-        .filter(item => !search || (item.name||'').toLowerCase().includes(search) || (item.alias||'').toLowerCase().includes(search))
-        .forEach(item => {
-          const alreadyOn = this.active.find(t => t.type === type.key && t.id === item.id);
-          const color = item.color || 'var(--gn)';
-          const el = document.createElement('div');
-          el.className = 'cpi-item' + (alreadyOn ? ' active' : '');
-          el.innerHTML = `
-            <div class="cpa" style="font-size:14px;background:${color}22">
-              <i class="fas ${type.icon}" style="color:${color}"></i>
-            </div>
-            <div class="cpin">
-              <div class="cpnm">${item.name || item.plate || item.id}</div>
-              <div class="cpal">${type.label}${item.alias ? ' · '+item.alias : ''}</div>
-            </div>
-            <div style="font-size:15px;color:${alreadyOn?'var(--gn)':'var(--t3)'};flex-shrink:0;margin-left:6px">
-              ${alreadyOn ? '<i class="fas fa-check-circle"></i>' : '<i class="far fa-circle"></i>'}
-            </div>`;
-          el.onclick = () => {
-            if (alreadyOn) { this.remove(type.key, item.id); el.classList.remove('active'); el.querySelector('div[style*="font-size:15px"]').innerHTML='<i class="far fa-circle"></i>'; el.querySelector('div[style*="font-size:15px"]').style.color='var(--t3)'; }
-            else { this.add(type.key, item.id, item.name||item.id, color, item); el.classList.add('active'); el.querySelector('div[style*="font-size:15px"]').innerHTML='<i class="fas fa-check-circle"></i>'; el.querySelector('div[style*="font-size:15px"]').style.color='var(--gn)'; }
-          };
-          el.addEventListener('contextmenu', e => { e.preventDefault(); CharCard.show(item.id, e.clientX, e.clientY, type.key); });
-          g.appendChild(el);
+      const filtered = items.filter(item =>
+        !search || (item.name||item.plate||'').toLowerCase().includes(search) || (item.alias||'').toLowerCase().includes(search)
+      );
+      filtered.forEach(item => {
+        totalShown++;
+        const isChar = type.key === 'char';
+        const alreadyOn = isChar && this.active.find(t => t.type === type.key && t.id === item.id);
+        const color = item.color || (type.key === 'org' ? '#4a8fe2' : type.key === 'vehicle' ? '#e8a74a' : type.key === 'equip' ? '#4db880' : '#9b6fd4');
+        const label = item.name || item.plate || item.id;
+
+        const el = document.createElement('div');
+        el.className = 'cpi-item';
+        el.style.cssText = 'cursor:pointer';
+
+        // Right action: chars → checkbox toggle, non-chars → "Ekle →" button
+        const actionHtml = isChar
+          ? `<div style="font-size:15px;color:${alreadyOn?'var(--gn)':'var(--t3)'};flex-shrink:0;margin-left:6px">
+               ${alreadyOn ? '<i class="fas fa-check-circle"></i>' : '<i class="far fa-circle"></i>'}
+             </div>`
+          : `<button style="padding:4px 10px;border-radius:var(--r);border:1px solid ${color}44;background:${color}15;color:${color};font-family:var(--mono);font-size:9px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0">
+               Ekle →
+             </button>`;
+
+        el.innerHTML = `
+          <div class="cpa" style="font-size:14px;background:${color}22;border:1px solid ${color}33">
+            <i class="fas ${type.icon}" style="color:${color}"></i>
+          </div>
+          <div class="cpin">
+            <div class="cpnm">${label}</div>
+            <div class="cpal">${type.label}${item.alias ? ' · ' + item.alias : ''}${item.plate && item.plate !== label ? ' · ' + item.plate : ''}</div>
+          </div>
+          ${actionHtml}`;
+
+        el.onclick = (e) => {
+          e.stopPropagation();
+          if (isChar) {
+            if (alreadyOn) this.remove(type.key, item.id);
+            else this.add(type.key, item.id, label, color, item);
+            // Re-render this item
+            this._renderTagGrid();
+          } else {
+            // Non-chars: insert into message, close picker
+            this.add(type.key, item.id, label, color, item);
+            CM('m-tag-picker');
+          }
+        };
+
+        el.addEventListener('contextmenu', e => {
+          e.preventDefault();
+          CharCard.show(item.id, e.clientX, e.clientY, type.key);
         });
+        g.appendChild(el);
+      });
     });
-    if (!g.children.length) g.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:24px;font-family:var(--mono);font-size:11px;color:var(--t3)">Sonuç yok</div>';
+
+    if (!totalShown) {
+      g.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:24px;font-family:var(--mono);font-size:11px;color:var(--t3)">Sonuç yok</div>';
+    }
   },
 
   _tagContextMenu(tag, e) {
