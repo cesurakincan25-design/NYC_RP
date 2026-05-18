@@ -165,10 +165,10 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 #ai-bar.show{display:block}
 #ai-bar-x{position:absolute;top:6px;right:8px;cursor:pointer;color:var(--t3);font-size:10px;border:none;background:none}
 /* typing */
-#typing-area{height:22px;padding:0 16px 0 64px;display:flex;align-items:center;flex-shrink:0}
+#typing-area{min-height:22px;padding:0 16px 0 64px;display:flex;align-items:center;flex-shrink:0;flex-wrap:wrap;gap:4px}
 .typing-text{font-family:var(--mono);font-size:11px;color:var(--t2);font-style:italic}
-.typing-dots{display:inline-flex;gap:3px;margin-right:6px}
-.typing-dots span{width:4px;height:4px;border-radius:50%;background:var(--t2);animation:tb 1.2s ease-in-out infinite}
+.typing-dots{display:inline-flex;gap:3px;margin-right:4px;flex-shrink:0}
+.typing-dots span{width:4px;height:4px;border-radius:50%;background:currentColor;animation:tb 1.2s ease-in-out infinite;display:inline-block}
 .typing-dots span:nth-child(2){animation-delay:.2s}.typing-dots span:nth-child(3){animation-delay:.4s}
 @keyframes tb{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-4px)}}
 /* input */
@@ -203,10 +203,15 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 .mem-sec{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;padding:8px 14px 4px}
 .mem-item{display:flex;align-items:center;gap:8px;padding:4px 14px;transition:background var(--tr)}
 .mem-item:hover{background:var(--bg3)}
-.mem-ava{width:28px;height:28px;border-radius:50%;background:var(--bg4);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;font-weight:600;color:var(--t2);overflow:hidden;flex-shrink:0;position:relative}
-.mem-ava img{width:100%;height:100%;object-fit:cover;display:block}
-.mem-dot{width:8px;height:8px;border-radius:50%;background:var(--t3);border:2px solid var(--bg1);position:absolute;bottom:0;right:0}
-.mem-dot.online{background:var(--gn)}
+.mem-ava{width:36px;height:36px;border-radius:50%;background:var(--bg4);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:13px;font-weight:700;color:var(--t2);overflow:hidden;flex-shrink:0;transition:box-shadow .3s}
+.mem-ava-online{animation:mem-glow 3s ease-in-out infinite}
+@keyframes mem-glow{
+  0%,100%{box-shadow:0 0 0 2px var(--glow-c,rgba(77,184,128,.5)),0 0 8px var(--glow-c,rgba(77,184,128,.3))}
+  50%{box-shadow:0 0 0 2px var(--glow-c,rgba(77,184,128,.8)),0 0 16px var(--glow-c,rgba(77,184,128,.5))}
+}
+.mem-ava img{width:100%;height:100%;object-fit:cover;display:block;border-radius:50%}
+/* Remove old dot — replaced by glow */
+.mem-dot{display:none}
 .mem-inf{flex:1;min-width:0}
 .mem-nm{font-size:12px;font-weight:500;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mem-al{font-family:var(--mono);font-size:10px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -909,17 +914,38 @@ const RP={
   sendTyping(){
     if(!S.activeChar||S._off)return;
     clearTimeout(S._tt);
-    DB.upsert('rp_presence','char_id',{char_id:S.activeChar.id,char_name:S.activeChar.name,char_alias:S.activeChar.alias||'',org_id:(S.activeChar.organizations||[])[0]||S.activeChar.organization||null,last_seen:new Date().toISOString(),is_typing:true,room_id:S.roomId}).catch(()=>{});
+    DB.upsert('rp_presence','char_id',{
+      char_id:S.activeChar.id,char_name:S.activeChar.name,
+      char_alias:S.activeChar.alias||'',
+      org_id:(S.activeChar.organizations||[])[0]||S.activeChar.organization||null,
+      last_seen:new Date().toISOString(),is_typing:true,
+      room_id:S.roomId,
+      reader_user_id:S.user?.id||null,
+    }).catch(()=>{});
     S._tt=setTimeout(()=>RP.clearTyping(),4000);
   },
   clearTyping(){
     clearTimeout(S._tt);
     if(!S.activeChar||S._off)return;
-    DB.upsert('rp_presence','char_id',{char_id:S.activeChar.id,char_name:S.activeChar.name,char_alias:S.activeChar.alias||'',org_id:(S.activeChar.organizations||[])[0]||S.activeChar.organization||null,last_seen:new Date().toISOString(),is_typing:false,room_id:S.roomId}).catch(()=>{});
+    DB.upsert('rp_presence','char_id',{
+      char_id:S.activeChar.id,char_name:S.activeChar.name,
+      char_alias:S.activeChar.alias||'',
+      org_id:(S.activeChar.organizations||[])[0]||S.activeChar.organization||null,
+      last_seen:new Date().toISOString(),is_typing:false,
+      room_id:S.roomId,
+      reader_user_id:S.user?.id||null,
+    }).catch(()=>{});
   },
   _hb(){
     if(!S.activeChar||S._off)return;
-    DB.upsert('rp_presence','char_id',{char_id:S.activeChar.id,char_name:S.activeChar.name,char_alias:S.activeChar.alias||'',org_id:(S.activeChar.organizations||[])[0]||S.activeChar.organization||null,last_seen:new Date().toISOString(),is_typing:false,room_id:S.roomId}).catch(()=>{});
+    DB.upsert('rp_presence','char_id',{
+      char_id:S.activeChar.id,char_name:S.activeChar.name,
+      char_alias:S.activeChar.alias||'',
+      org_id:(S.activeChar.organizations||[])[0]||S.activeChar.organization||null,
+      last_seen:new Date().toISOString(),is_typing:false,
+      room_id:S.roomId,
+      reader_user_id:S.user?.id||null,
+    }).catch(()=>{});
   },
   /* misc */
   toggleEmoji(e){
@@ -971,48 +997,119 @@ const RP={
 
 /* ═══ REALTIME ═══════════════════════════════════════════ */
 const RT={
-  lastId:null,ws:null,pt:null,
+  lastId:null, ws:null, pt:null,
+  _wsAlive:false,   // WS actively receiving
+  _wsAliveTimer:null,
+
   connect(roomId){
     this.disconnect();
-    this.pt=setInterval(()=>this._poll(roomId),1500);
-    try{
-      const ws=new WebSocket(SUPA_URL.replace('https://','wss://')+'/realtime/v1/websocket?apikey='+SUPA_KEY+'&vsn=1.0.0');
-      this.ws=ws;
-      ws.onopen=()=>ws.send(JSON.stringify({topic:`realtime:public:rp_messages:room_id=eq.${roomId}`,event:'phx_join',payload:{},ref:1}));
-      ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.event==='INSERT'&&m.topic?.includes('rp_messages'))this._handleMsg(m.payload.record);};
-      ws.onerror=()=>{};
-    }catch(e){}
+    // Polling fallback — only fires if WS is silent for >2s
+    this.pt=setInterval(()=>{
+      if(!this._wsAlive) this._poll(roomId);
+      this._wsAlive=false; // reset each cycle
+    },800);
+    this._connectWS(roomId);
   },
-  disconnect(){clearInterval(this.pt);if(this.ws){try{this.ws.close();}catch(e){}this.ws=null;}},
+
+  _connectWS(roomId){
+    try{
+      const wsUrl=SUPA_URL.replace('https://','wss://')+'/realtime/v1/websocket?apikey='+SUPA_KEY+'&vsn=1.0.0';
+      const ws=new WebSocket(wsUrl);
+      this.ws=ws;
+      ws.onopen=()=>{
+        ws.send(JSON.stringify({topic:`realtime:public:rp_messages:room_id=eq.${roomId}`,event:'phx_join',payload:{},ref:1}));
+        // Keep-alive ping every 25s
+        this._pingTimer=setInterval(()=>{try{ws.send(JSON.stringify({topic:'phoenix',event:'heartbeat',payload:{},ref:0}));}catch(e){}},25000);
+      };
+      ws.onmessage=e=>{
+        try{
+          const m=JSON.parse(e.data);
+          if(m.event==='INSERT'&&m.topic?.includes('rp_messages')){
+            this._wsAlive=true; // WS is alive
+            this._handleMsg(m.payload.record);
+          }
+          // Also handle presence inserts via WS
+          if(m.event==='INSERT'&&m.topic?.includes('rp_presence')){
+            this._wsAlive=true;
+            this._handlePresence(m.payload.record);
+          }
+        }catch(ex){}
+      };
+      ws.onclose=()=>{ clearInterval(this._pingTimer); this._wsAlive=false; };
+      ws.onerror=()=>{ this._wsAlive=false; };
+    }catch(e){ this._wsAlive=false; }
+  },
+
+  disconnect(){
+    clearInterval(this.pt);
+    clearInterval(this._pingTimer);
+    if(this.ws){try{this.ws.close();}catch(e){} this.ws=null;}
+    this._wsAlive=false;
+  },
+
   async _poll(roomId){
     if(!roomId||S._off)return;
     try{
-      const qs=this.lastId?`rp_messages?room_id=eq.${roomId}&id=gt.${this.lastId}&is_deleted=eq.false&order=id.asc&limit=30`:`rp_messages?room_id=eq.${roomId}&is_deleted=eq.false&order=id.asc&limit=30&select=id,room_id,char_id,char_name,char_alias,char_avatar,org_id,org_name,org_color,content,attachment_url,reactions,is_edited,reply_to_id,reply_to_sender,reply_to_content,created_at`;
-      const rows=await DB.get(qs);rows.forEach(r=>this._handleMsg(r));
+      const qs=this.lastId
+        ?`rp_messages?room_id=eq.${roomId}&id=gt.${this.lastId}&is_deleted=eq.false&order=id.asc&limit=30`
+        :`rp_messages?room_id=eq.${roomId}&is_deleted=eq.false&order=id.asc&limit=30&select=id,room_id,char_id,char_name,char_alias,char_avatar,org_id,org_name,org_color,content,attachment_url,reactions,is_edited,reply_to_id,reply_to_sender,reply_to_content,sent_by_user,created_at`;
+      const rows=await DB.get(qs);
+      rows.forEach(r=>this._handleMsg(r));
     }catch(e){}
   },
+
   async _presence(){
     if(S._off)return;
     try{
-      const cut=new Date(Date.now()-60000).toISOString(); // 1 dakika (daha kısa window)
+      const cut=new Date(Date.now()-60000).toISOString();
       const rows=await DB.get(`rp_presence?last_seen=gte.${cut}&select=char_id,char_name,char_alias,org_id,last_seen,is_typing,room_id,reader_user_id`);
       S.presence={};
-      rows.forEach(r=>{S.presence[r.char_id]=r;});
-      // Typing users in current room
+      rows.forEach(r=>{ S.presence[r.char_id]=r; });
+      // Typing: chars in current room that aren't mine
       S.typing={};
       rows.filter(r=>r.is_typing&&r.room_id==S.roomId&&r.char_id!==S.activeChar?.id)
-          .forEach(r=>{S.typing[r.char_id]={name:r.char_name};});
+          .forEach(r=>{
+            S.typing[r.char_id]={
+              charName: r.char_name,
+              userId:   r.reader_user_id||'',
+              userName: USERS?.find(u=>u.id===r.reader_user_id)?.name||r.char_name,
+              userColor:USERS?.find(u=>u.id===r.reader_user_id)?.color||'var(--t2)',
+            };
+          });
       UI.renderMembers();
       UI.renderTyping();
     }catch(e){}
   },
+
+  _handlePresence(rec){
+    // Live presence update via WS — immediately refresh typing/members
+    if(rec.is_typing!==undefined){
+      S.presence[rec.char_id]=rec;
+      if(rec.is_typing&&rec.room_id==S.roomId&&rec.char_id!==S.activeChar?.id){
+        S.typing[rec.char_id]={
+          charName: rec.char_name,
+          userId:   rec.reader_user_id||'',
+          userName: USERS?.find(u=>u.id===rec.reader_user_id)?.name||rec.char_name,
+          userColor:USERS?.find(u=>u.id===rec.reader_user_id)?.color||'var(--t2)',
+        };
+      }else{
+        delete S.typing[rec.char_id];
+      }
+      UI.renderTyping();
+      UI.renderMembers();
+    }
+  },
+
   _handleMsg(rec){
     if(!S.msgs[S.roomId])S.msgs[S.roomId]=[];
     if(S.msgs[S.roomId].find(m=>m.id===rec.id))return;
     if(rec.room_id!=S.roomId)return;
-    S.msgs[S.roomId].push(rec);this.lastId=rec.id;
-    UI.append(rec);document.getElementById('empty-state')?.remove();
-    if(rec.char_id){delete S.typing[rec.char_id];UI.renderTyping();}
+    S.msgs[S.roomId].push(rec);
+    this.lastId=rec.id;
+    UI.append(rec);
+    document.getElementById('empty-state')?.remove();
+    // Clear typing indicator for this char when they send
+    if(rec.char_id){ delete S.typing[rec.char_id]; UI.renderTyping(); }
     OAI.Batcher.ingest([rec]);
   }
 };
@@ -1195,23 +1292,29 @@ const UI={
     const area=document.getElementById('typing-area');
     const list=Object.values(S.typing);
     if(!list.length){area.innerHTML='';return;}
-    const names=list.slice(0,3).map(t=>t.name).join(', ');
-    area.innerHTML=`<span class="typing-dots"><span></span><span></span><span></span></span><span class="typing-text">${names} yazıyor…</span>`;
+    // Show: "Eren (Wrench) yazıyor..."
+    const parts=list.slice(0,3).map(t=>{
+      const color=t.userColor||'var(--t2)';
+      const name=t.userName||t.charName||'?';
+      const char=t.charName&&t.charName!==name?` <span style="color:var(--t3);font-style:normal">(${t.charName})</span>`:'';
+      return `<span style="color:${color};font-weight:600">${name}</span>${char}`;
+    });
+    area.innerHTML=`<span class="typing-dots"><span></span><span></span><span></span></span><span class="typing-text">${parts.join(', ')} yazıyor…</span>`;
   },
+
   renderMembers(){
     const list=document.getElementById('members-list');
     const now=Date.now();
-    // Build set of online user IDs from presence (last 60s)
     const onlineUserIds=new Set();
+    // Collect online users from presence
     Object.values(S.presence).forEach(p=>{
-      if(!p.last_seen) return;
-      const age=now-new Date(p.last_seen).getTime();
-      if(age>60000) return;
-      // reader_user_id is the player id we heartbeat with
-      if(p.reader_user_id) onlineUserIds.add(p.reader_user_id);
+      if(!p.last_seen)return;
+      if(now-new Date(p.last_seen).getTime()>60000)return;
+      if(p.reader_user_id)onlineUserIds.add(p.reader_user_id);
     });
-    // Always show self as online
-    if(S.user) onlineUserIds.add(S.user.id);
+    if(S.user)onlineUserIds.add(S.user.id);
+    // Typing users (for indicator in members panel)
+    const typingUserIds=new Set(Object.values(S.typing).map(t=>t.userId).filter(Boolean));
     const allUsers=USERS||[];
     document.getElementById('mem-cnt').textContent=onlineUserIds.size;
     list.innerHTML='';
@@ -1220,38 +1323,55 @@ const UI={
     if(onlinePlayers.length){
       const sec=document.createElement('div');sec.className='mem-sec';
       sec.textContent=`Çevrimiçi — ${onlinePlayers.length}`;list.appendChild(sec);
-      onlinePlayers.forEach(u=>this._renderPlayerItem(list,u,true));
+      onlinePlayers.forEach(u=>this._renderPlayerItem(list,u,true,typingUserIds.has(u.id)));
     }
     if(offlinePlayers.length){
       const sec=document.createElement('div');sec.className='mem-sec';
       sec.style.marginTop='8px';sec.textContent='Çevrimdışı';list.appendChild(sec);
-      offlinePlayers.forEach(u=>this._renderPlayerItem(list,u,false));
+      offlinePlayers.forEach(u=>this._renderPlayerItem(list,u,false,false));
     }
   },
-  _renderPlayerItem(list,user,isOnline){
+
+  _renderPlayerItem(list,user,isOnline,isTyping){
     const profile=S.playerProfiles?.[user.id]||null;
     const isSelf=S.user?.id===user.id;
-    const el=document.createElement('div');el.className='mem-item';
-    el.style.opacity=isOnline?'1':'0.45';
+    const el=document.createElement('div');
+    el.className='mem-item';
+    el.style.opacity=isOnline?'1':'0.4';
+
+    // Glow effect via CSS custom property
+    const glowColor=isOnline?user.color:'transparent';
+
     // Avatar
-    let avaHtml='';
+    let avaContent='';
     if(profile?.avatar_type==='emoji'&&profile.avatar_url){
-      avaHtml=`<div class="mem-ava" style="font-size:18px;background:${user.color}22;border-color:${user.color}44">${profile.avatar_url}<div class="mem-dot ${isOnline?'online':''}"></div></div>`;
+      avaContent=`<span style="font-size:18px;line-height:1">${profile.avatar_url}</span>`;
     }else if(profile?.avatar_type==='url'&&profile.avatar_url){
-      avaHtml=`<div class="mem-ava" style="border-color:${user.color}44"><img src="${profile.avatar_url}" onerror="this.parentNode.style.background='${user.color}22';this.remove()"><div class="mem-dot ${isOnline?'online':''}"></div></div>`;
+      avaContent=`<img src="${profile.avatar_url}" onerror="this.parentNode.style.background='${user.color}22';this.remove()" style="width:100%;height:100%;object-fit:cover;display:block">`;
     }else{
-      avaHtml=`<div class="mem-ava" style="background:${user.color}22;color:${user.color}">${user.name[0]}<div class="mem-dot ${isOnline?'online':''}"></div></div>`;
+      avaContent=`<span style="color:${user.color};font-weight:700">${user.name[0]}</span>`;
     }
-    const statusText=profile?.status_text?`<div class="mem-al">${profile.status_emoji||''} ${profile.status_text}</div>`:'';
-    el.innerHTML=`${avaHtml}
-      <div class="mem-inf">
-        <div class="mem-nm" style="color:${user.color}">${user.name}${isSelf?'<span style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-left:4px">(sen)</span>':''}</div>
-        ${statusText}
+
+    // Typing indicator chips (chars being played by this user)
+    const typingChars=Object.values(S.typing).filter(t=>t.userId===user.id);
+    const typingHtml=typingChars.length
+      ?`<div style="display:flex;align-items:center;gap:3px;margin-top:1px">
+          <span class="typing-dots" style="margin-right:2px"><span></span><span></span><span></span></span>
+          <span style="font-family:var(--mono);font-size:9px;color:${user.color}">${typingChars[0].charName}</span>
+        </div>`
+      :(profile?.status_text?`<div class="mem-al">${profile.status_emoji||''} ${profile.status_text}</div>`:'');
+
+    el.innerHTML=`
+      <div class="mem-ava ${isOnline?'mem-ava-online':''}" style="
+        background:${user.color}22;
+        ${isOnline?`box-shadow:0 0 0 2px ${user.color}66,0 0 12px ${user.color}44`:''}
+      ">${avaContent}</div>
+      <div class="mem-inf" style="cursor:pointer" onclick="PlayerProfile.open('${user.id}')">
+        <div class="mem-nm" style="color:${isOnline?user.color:'var(--t2)'}">${user.name}${isSelf?'<span style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-left:4px">(sen)</span>':''}</div>
+        ${typingHtml}
       </div>
       ${!isSelf?`<button class="mem-pm-btn" title="PM gönder" onclick="PM.open('${user.id}')"><i class="fas fa-comment"></i></button>`:''}
       ${isSelf?`<button class="mem-pm-btn" title="Profili düzenle" onclick="PlayerProfile.open('${user.id}')"><i class="fas fa-edit"></i></button>`:''}`;
-    // Click → open profile
-    el.querySelector('.mem-inf').onclick=()=>PlayerProfile.open(user.id);
     list.appendChild(el);
   },
   updChar(char){
