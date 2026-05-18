@@ -542,8 +542,9 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 /* ═══ CONSTANTS ═════════════════════════════════════════ */
 const SUPA_URL='https://vhzroetspwbwmouqkcxe.supabase.co';
 const SUPA_KEY='sb_publishable_kM788c6s2-mOyndFnIdc1A_EKPSIz8J';
-const GEM_KEY='AIzaSyB-CAxFb8WeRmQmmXCChK3HxNedndq2Sf0';
 const GEM_MDL='gemini-1.5-flash';
+// Gemini API key moved to Edge Function (gemini-proxy)
+// Direct key removed for security — calls go via SUPA_URL/functions/v1/gemini-proxy
 const ADM_PASS='1';
 const DB_TO=8000;
 const EMOJIS=['👍','❤️','😂','😮','😢','🔥','⚔️','💀','🎯','🤝','👀','💬'];
@@ -1680,7 +1681,7 @@ const OAI={
       const orgs=S.orgs.map(o=>`• ${o.name} [${o.id}]`).join('\n');
       const tr=messages.map(m=>{const t=new Date(m.created_at).toISOString().slice(11,16);return `[${t}] ${m.char_name}${m.char_alias?` "${m.char_alias}"`:''}${m.org_name?` [${m.org_name}]`:''}: ${m.content}`;}).join('\n');
       const prompt=`You are NYC_DB Observer AI. Observe only. Return ONLY valid JSON.\nROSTER:\nCHARACTERS:\n${chars}\nORGANIZATIONS:\n${orgs}\nTRANSCRIPT:\n${tr}\nRespond:{"session_summary":{"title":"","summary":"","involved_chars":[],"involved_orgs":[],"significance":"low"},"incidents":[{"title":"","incident_type":"confrontation","severity":"low","description":"","location_name":"","involved_chars":[],"involved_orgs":[],"source_confidence":0.0}],"character_memories":[{"char_id":"","char_name":"","memory_type":"event","title":"","content":"","emotional_tag":"neutral","importance":50,"about_chars":[]}],"relationship_changes":[{"entity_a_id":"","entity_a_name":"","entity_a_type":"character","entity_b_id":"","entity_b_name":"","entity_b_type":"character","change_type":"neutral","direction":"mutual","trust_delta":0,"description":""}],"flags":{"requires_admin_review":false,"review_reason":""}}`;
-      const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEM_MDL}:generateContent?key=${GEM_KEY}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{temperature:0.2,topP:0.8,maxOutputTokens:2048,responseMimeType:'application/json'},safetySettings:[{category:'HARM_CATEGORY_HARASSMENT',threshold:'BLOCK_NONE'},{category:'HARM_CATEGORY_HATE_SPEECH',threshold:'BLOCK_NONE'},{category:'HARM_CATEGORY_SEXUALLY_EXPLICIT',threshold:'BLOCK_NONE'},{category:'HARM_CATEGORY_DANGEROUS_CONTENT',threshold:'BLOCK_NONE'}]})});
+      const r=await fetch(`${SUPA_URL}/functions/v1/gemini-proxy`,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY},body:JSON.stringify({model:GEM_MDL,contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{temperature:0.2,topP:0.8,maxOutputTokens:2048,responseMimeType:'application/json'},safetySettings:[{category:'HARM_CATEGORY_HARASSMENT',threshold:'BLOCK_NONE'},{category:'HARM_CATEGORY_HATE_SPEECH',threshold:'BLOCK_NONE'},{category:'HARM_CATEGORY_SEXUALLY_EXPLICIT',threshold:'BLOCK_NONE'},{category:'HARM_CATEGORY_DANGEROUS_CONTENT',threshold:'BLOCK_NONE'}]})});
       if(!r.ok)throw new Error('Gemini '+r.status);
       const d=await r.json();const raw=d?.candidates?.[0]?.content?.parts?.[0]?.text;if(!raw)throw new Error('Gemini empty');
       const parsed=JSON.parse(raw.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```$/i,'').trim());
@@ -2514,8 +2515,9 @@ window.DM_CONFIG = {
   supaUrl:    'https://vhzroetspwbwmouqkcxe.supabase.co',
   supaKey:    'sb_publishable_kM788c6s2-mOyndFnIdc1A_EKPSIz8J',
 
-  // ── Gemini ──────────────────────────────────────────
-  geminiKey:  'AIzaSyB-CAxFb8WeRmQmmXCChK3HxNedndq2Sf0',
+  // ── Gemini — key stored as Edge Function secret ─────
+  // Set with: supabase secrets set GEMINI_API_KEY=AIzaSy...
+  geminiKey:  '',  // Not used — proxy handles auth
   geminiModel:'gemini-1.5-flash',
 
   // ── Players (synced from USERS constant above) ──────
