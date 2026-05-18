@@ -1053,14 +1053,12 @@ const RT={
       const ws=new WebSocket(wsUrl);
       this.ws=ws;
       ws.onopen=()=>{
-        // Subscribe to messages in current room
-        ws.send(JSON.stringify({topic:`realtime:public:rp_messages:room_id=eq.${roomId}`,event:'phx_join',payload:{},ref:1}));
-        // Subscribe to presence (for typing indicators)
+        // Subscribe to all rp_messages events in this room (INSERT + UPDATE for deletes)
+        ws.send(JSON.stringify({topic:`realtime:public:rp_messages`,event:'phx_join',payload:{},ref:1}));
+        // Subscribe to presence
         ws.send(JSON.stringify({topic:`realtime:public:rp_presence`,event:'phx_join',payload:{},ref:2}));
-        // Subscribe to PM messages for current user
-        if(S.user){
-          ws.send(JSON.stringify({topic:`realtime:public:dm_messages`,event:'phx_join',payload:{},ref:3}));
-        }
+        // Subscribe to PM messages
+        ws.send(JSON.stringify({topic:`realtime:public:dm_messages`,event:'phx_join',payload:{},ref:3}));
         // Keep-alive ping every 25s
         this._pingTimer=setInterval(()=>{try{ws.send(JSON.stringify({topic:'phoenix',event:'heartbeat',payload:{},ref:0}));}catch(e){}},25000);
       };
