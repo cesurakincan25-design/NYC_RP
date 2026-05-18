@@ -542,7 +542,7 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 /* ═══ CONSTANTS ═════════════════════════════════════════ */
 const SUPA_URL='https://vhzroetspwbwmouqkcxe.supabase.co';
 const SUPA_KEY='sb_publishable_kM788c6s2-mOyndFnIdc1A_EKPSIz8J';
-const GEM_MDL='gemini-1.5-flash';
+const GEM_MDL='gemini-2.5-flash';
 // Gemini API key moved to Edge Function (gemini-proxy)
 // Direct key removed for security — calls go via SUPA_URL/functions/v1/gemini-proxy
 const ADM_PASS='1';
@@ -2521,7 +2521,7 @@ window.DM_CONFIG = {
   // ── Gemini — key stored as Edge Function secret ─────
   // Set with: supabase secrets set GEMINI_API_KEY=AIzaSy...
   geminiKey:  '',  // Not used — proxy handles auth
-  geminiModel:'gemini-1.5-flash',
+  geminiModel:'gemini-2.5-flash',
 
   // ── Players (synced from USERS constant above) ──────
   players: [
