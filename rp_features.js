@@ -298,7 +298,19 @@ const TagSystem = {
     bar.appendChild(addTag);
   },
 
-  openPicker() {
+  async openPicker() {
+    // Lazy load S._db if not loaded yet
+    if (!S._db) {
+      try {
+        const dbTable = window.DM_CONFIG?.dbTable ||
+          (typeof SUPA_URL !== 'undefined' && SUPA_URL.includes('nytmjhdxlpttowxogxci') ? 'tokyo_db' : 'nyc_db');
+        const rows = await DB.get(`${dbTable}?id=eq.main&select=data`);
+        if (rows.length) {
+          const d = typeof rows[0].data === 'string' ? JSON.parse(rows[0].data) : rows[0].data;
+          S._db = d;
+        }
+      } catch(e) { console.warn('[TagSystem] DB load failed:', e); }
+    }
     // Build modal if needed
     let modal = document.getElementById('m-tag-picker');
     if (!modal) {
@@ -493,13 +505,21 @@ const CharCard = {
 
     // Position
     const vw = window.innerWidth, vh = window.innerHeight;
-    const W = 280, H = 300;
-    card.style.left = Math.min(x + 8, vw - W - 16) + 'px';
-    card.style.top  = Math.min(y + 8, vh - H - 16) + 'px';
+    const W = 300, H = 320;
+    // Smart positioning: prefer right+below, flip if near edge
+    let left = x + 8;
+    let top  = y + 8;
+    if (left + W > vw - 8)  left = Math.max(8, x - W - 8);
+    if (top  + H > vh - 8)  top  = Math.max(8, y - H - 8);
+    card.style.cssText = `position:fixed;left:${left}px;top:${top}px;z-index:450;width:${W}px`;
 
     document.body.appendChild(card);
     setTimeout(() => card.classList.add('cc-visible'), 10);
-    document.addEventListener('click', this._outsideClick, { once: true });
+
+    // Close on outside click — use setTimeout to avoid immediate close
+    setTimeout(() => {
+      document.addEventListener('click', CharCard._outsideClick, { once: true });
+    }, 50);
   },
 
   hide() {
@@ -1093,20 +1113,26 @@ const FEATURE_CSS = `
     };
 
     // Load additional DB data (vehicles, equipment, properties) for tag system
-    // Fetched lazily when tag picker opens
+    // RP.init already fetches the main DB — we just need to store it in S._db
+    // Hook into RP.init to capture the full data
     const _origInit = RP.init.bind(RP);
     RP.init = async function() {
       await _origInit();
-      // Store full DB for tag system
-      try {
-        const rows = await DB.get(
-          `${window.DM_CONFIG?.dbTable || 'nyc_db'}?id=eq.main&select=data`
-        );
-        if (rows.length) {
-          const d = typeof rows[0].data === 'string' ? JSON.parse(rows[0].data) : rows[0].data;
-          S._db = d; // vehicles, properties, equipments, etc.
-        }
-      } catch(e) {}
+      // S.chars and S.orgs are already loaded by RP.init
+      // Now load full DB including vehicles/properties/equipments
+      if (!S._db) {
+        try {
+          const dbTable = window.DM_CONFIG?.dbTable ||
+            (window.SUPA_URL?.includes('nytmjhdxlpttowxogxci') ? 'tokyo_db' : 'nyc_db');
+          const rows = await DB.get(`${dbTable}?id=eq.main&select=data`);
+          if (rows.length) {
+            const d = typeof rows[0].data === 'string' ? JSON.parse(rows[0].data) : rows[0].data;
+            S._db = d;
+            console.log('[rp_features] DB loaded — vehicles:', (d.vehicles||[]).length,
+              'properties:', (d.properties||[]).length, 'equipments:', (d.equipments||[]).length);
+          }
+        } catch(e) { console.warn('[rp_features] DB load failed:', e.message); }
+      }
     };
 
     console.log('[rp_features] Loaded: CharPicker, TagSystem, CharCard, Reactions, ReadReceipts');
