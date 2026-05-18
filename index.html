@@ -577,7 +577,8 @@ const S={
   chars:[],orgs:[],ci:new Map(),oi:new Map(),cni:new Map(),
   rooms:[],msgs:{},roomId:null,
   user:null,activeChar:null,activeChars:[],
-  presence:{},typing:{},attach:null,reply:null,_off:false
+  presence:{},typing:{},attach:null,reply:null,_off:false,
+  playerProfiles:{},  // { userId: profileObj }
 };
 
 /* ═══ LOGIN ════════════════════════════════════════════ */
@@ -1081,22 +1082,62 @@ const UI={
     const list=document.getElementById('messages-list');
     document.getElementById('empty-state')?.remove();
     const prev=list.lastElementChild;
-    const ns=forceNS!==null?forceNS:(!prev||prev.dataset?.charId!==String(msg.char_id));
-    const ini=(msg.char_name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    // Group by sent_by_user (oyuncu), not char_id
+    const prevUser=prev?.dataset?.userId||'';
+    const thisUser=msg.sent_by_user||msg.char_id||'';
+    const ns=forceNS!==null?forceNS:(prevUser!==thisUser);
     const time=new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-    const orgC=msg.org_color;
-    const orgStyle=orgC?`background:${orgC}22;color:${orgC};border:1px solid ${orgC}55;`:'background:var(--bg4);color:var(--t2);';
     const replyHtml=msg.reply_to_id?`<div class="msg-reply-ref" onclick="UI.scrollToMsg('${msg.reply_to_id}')"><i class="fas fa-reply" style="font-size:10px;color:var(--ac)"></i><span class="rr-sndr">${(msg.reply_to_sender||'?').replace(/</g,'&lt;')}:</span><span class="rr-txt">${(msg.reply_to_content||'').replace(/</g,'&lt;')}</span></div>`:'';
-    /* safe JSON for data attrs */
     const rData=JSON.stringify({id:msg.id,char_name:msg.char_name,content:msg.content}).replace(/"/g,'&quot;');
     const fData=JSON.stringify({id:msg.id,content:msg.content,attachment_url:msg.attachment_url||null}).replace(/"/g,'&quot;');
+
+    // ── Oyuncu bilgisi ───────────────────────────────────────
+    const player=USERS?.find(u=>u.id===msg.sent_by_user)||null;
+    const playerProfile=S.playerProfiles?.[msg.sent_by_user]||null;
+    const playerColor=player?.color||'var(--ac)';
+    const playerName=player?.name||msg.sent_by_user||'?';
+    const playerIni=playerName[0]?.toUpperCase()||'?';
+    const playerAvatar=playerProfile?.avatar_url||'';
+    const playerAvatarType=playerProfile?.avatar_type||'initials';
+    const playerBio=playerProfile?.status_text||'';
+
+    // Player avatar HTML
+    let pAvaHtml='';
+    if(playerAvatarType==='emoji'&&playerAvatar){
+      pAvaHtml=`<div class="msg-player-ava" style="background:${playerColor}22;border-color:${playerColor}44;font-size:18px">${playerAvatar}</div>`;
+    }else if(playerAvatarType==='url'&&playerAvatar){
+      pAvaHtml=`<div class="msg-player-ava" style="border-color:${playerColor}44"><img src="${playerAvatar}" onerror="this.parentNode.innerHTML='${playerIni}';this.parentNode.style.background='${playerColor}22'"></div>`;
+    }else{
+      pAvaHtml=`<div class="msg-player-ava" style="background:${playerColor}22;border-color:${playerColor}44;color:${playerColor}">${playerIni}</div>`;
+    }
+
     const el=document.createElement('div');
     el.className='msg-group'+(ns?' new-sender':'')+(isFav?' fav':'');
-    el.dataset.msgId=msg.id;el.dataset.charId=String(msg.char_id||'');
+    el.dataset.msgId=msg.id;
+    el.dataset.charId=String(msg.char_id||'');
+    el.dataset.userId=thisUser;
+
     el.innerHTML=`
-      <div class="msg-ava-col">${ns?`<div class="msg-ava" onclick="UI.charPreview('${msg.char_id}')">${msg.char_avatar?`<img src="${msg.char_avatar}" onerror="this.parentNode.innerHTML='${ini}'" loading="lazy">`:ini}</div>`:'<div class="msg-ava-ph"></div>'}</div>
+      <div class="msg-ava-col">
+        ${ns?`<div class="msg-player-ava-wrap" title="${playerName}${playerBio?' — '+playerBio:''}" onclick="PlayerProfile.open('${msg.sent_by_user||''}')">
+          ${pAvaHtml}
+        </div>`:'<div class="msg-ava-ph"></div>'}
+      </div>
       <div class="msg-body">
-        ${ns?`<div class="msg-meta"><span class="msg-char" onclick="UI.charPreview('${msg.char_id}')">${msg.char_name}</span>${msg.org_name?`<span class="msg-org" style="${orgStyle}">${msg.org_name}</span>`:''}${msg.char_alias?`<span style="font-size:11px;color:var(--t3);font-family:var(--mono)">${msg.char_alias}</span>`:''}${msg.sent_by_user?`<span style="font-family:var(--mono);font-size:9px;color:var(--t3);background:var(--bg4);padding:1px 5px;border-radius:2px">${msg.sent_by_user}</span>`:''}<span class="msg-ts">${time}${msg.is_edited?'<span class="msg-edited"> (düz)</span>':''}</span></div>`:''}
+        ${ns?`<div class="msg-meta">
+          <span class="msg-player-name" style="color:${playerColor}" onclick="PlayerProfile.open('${msg.sent_by_user||''}')">
+            ${playerName}
+          </span>
+          <span class="msg-char-list">
+            <span class="msg-char-tag" data-char-id="${msg.char_id||''}"
+              onclick="UI.charPreview('${msg.char_id}')"
+              oncontextmenu="event.preventDefault();UI.charContextMenu(event,'${msg.char_id}','${(msg.char_name||'').replace(/'/g,"\\'")}')">
+              ${msg.char_name||''}${msg.char_alias?` <span class="msg-char-alias">"${msg.char_alias}"</span>`:''}
+              ${msg.org_name?`<span class="msg-org" style="background:${msg.org_color||''}22;color:${msg.org_color||'var(--t2)'};border:1px solid ${msg.org_color||'transparent'}55">${msg.org_name}</span>`:''}
+            </span>
+          </span>
+          <span class="msg-ts">${time}${msg.is_edited?'<span class="msg-edited"> (düz)</span>':''}</span>
+        </div>`:''}
         ${replyHtml}
         <div class="msg-text">${UI._rc(msg.content)}</div>
         <div class="msg-edit-wrap"><textarea class="edt-ta" rows="2"></textarea><div class="edt-btns"><button class="edt-save" onclick="UI.saveEdit('${msg.id}',this)">Kaydet</button><button class="edt-cancel" onclick="UI.cancelEdit('${msg.id}')">İptal</button></div></div>
@@ -1112,10 +1153,21 @@ const UI={
         <button class="mac" data-tip="Kopyala" onclick="UI.copyMsg('${msg.id}')"><i class="fas fa-copy"></i></button>
         <button class="mac del" data-tip="Sil" onclick="if(confirm('Mesajı sil?'))RP.delMsg('${msg.id}')"><i class="fas fa-trash"></i></button>
       </div>`;
+
     const re=el.querySelector('.msg-reactions');
     if(re)UI.renderReacts(re,msg);
     list.appendChild(el);
     if(scroll)UI.scrollBot();
+  },
+  // Char name right-click in message
+  charContextMenu(e,charId,charName){
+    if(typeof ContextMenu!=='undefined'){
+      ContextMenu.show(e.clientX,e.clientY,[
+        {icon:'fa-id-card',label:'Profil Kartı',action:()=>{if(typeof CharCard!=='undefined')CharCard.show(charId,e.clientX,e.clientY);}},
+        {icon:'fa-external-link-alt',label:"DB'de Aç",action:()=>{if(typeof CharCard!=='undefined')CharCard.openInDB(charId,'char');}},
+        {icon:'fa-plus',label:'Sahneye Ekle',action:()=>{const c=S.ci.get(charId);if(c)RP.toggleChar(c);}},
+      ]);
+    }
   },
   renderReacts(el,msg){
     el.innerHTML='';
@@ -1136,18 +1188,57 @@ const UI={
   },
   renderMembers(){
     const list=document.getElementById('members-list');
-    const online=Object.values(S.presence);
-    document.getElementById('mem-cnt').textContent=online.length;
-    list.innerHTML='';
-    if(!online.length){list.innerHTML='<div style="padding:12px 14px;font-family:var(--mono);font-size:11px;color:var(--t3)">Kimse çevrimiçi değil</div>';return;}
-    const sec=document.createElement('div');sec.className='mem-sec';sec.textContent=`Çevrimiçi — ${online.length}`;list.appendChild(sec);
-    online.forEach(p=>{
-      const c=S.ci.get(p.char_id);
-      const ini=(p.char_name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-      const el=document.createElement('div');el.className='mem-item';
-      el.innerHTML=`<div class="mem-ava">${c?.image?`<img src="${c.image}" onerror="this.parentNode.innerHTML='${ini}'" loading="lazy">`:ini}<div class="mem-dot online"></div></div><div class="mem-inf"><div class="mem-nm">${p.char_name}</div><div class="mem-al">${p.char_alias||'—'}</div></div>`;
-      list.appendChild(el);
+    // Show PLAYERS (from USERS), not characters
+    // Online = player has presence within last 2 min
+    const now=Date.now();
+    const onlineUserIds=new Set();
+    Object.values(S.presence).forEach(p=>{
+      if(p.last_seen&&(now-new Date(p.last_seen).getTime())<120000){
+        onlineUserIds.add(p.reader_user_id||p.sent_by_user||p.char_id);
+      }
     });
+    // Also mark current user as online
+    if(S.user)onlineUserIds.add(S.user.id);
+    const allUsers=USERS||[];
+    document.getElementById('mem-cnt').textContent=onlineUserIds.size;
+    list.innerHTML='';
+    // Online players
+    const onlinePlayers=allUsers.filter(u=>onlineUserIds.has(u.id));
+    const offlinePlayers=allUsers.filter(u=>!onlineUserIds.has(u.id));
+    if(onlinePlayers.length){
+      const sec=document.createElement('div');sec.className='mem-sec';sec.textContent=`Çevrimiçi — ${onlinePlayers.length}`;list.appendChild(sec);
+      onlinePlayers.forEach(u=>this._renderPlayerItem(list,u,true));
+    }
+    if(offlinePlayers.length){
+      const sec=document.createElement('div');sec.className='mem-sec';sec.style.marginTop='8px';sec.textContent='Çevrimdışı';list.appendChild(sec);
+      offlinePlayers.forEach(u=>this._renderPlayerItem(list,u,false));
+    }
+  },
+  _renderPlayerItem(list,user,isOnline){
+    const profile=S.playerProfiles?.[user.id]||null;
+    const isSelf=S.user?.id===user.id;
+    const el=document.createElement('div');el.className='mem-item';
+    el.style.opacity=isOnline?'1':'0.45';
+    // Avatar
+    let avaHtml='';
+    if(profile?.avatar_type==='emoji'&&profile.avatar_url){
+      avaHtml=`<div class="mem-ava" style="font-size:18px;background:${user.color}22;border-color:${user.color}44">${profile.avatar_url}<div class="mem-dot ${isOnline?'online':''}"></div></div>`;
+    }else if(profile?.avatar_type==='url'&&profile.avatar_url){
+      avaHtml=`<div class="mem-ava" style="border-color:${user.color}44"><img src="${profile.avatar_url}" onerror="this.parentNode.style.background='${user.color}22';this.remove()"><div class="mem-dot ${isOnline?'online':''}"></div></div>`;
+    }else{
+      avaHtml=`<div class="mem-ava" style="background:${user.color}22;color:${user.color}">${user.name[0]}<div class="mem-dot ${isOnline?'online':''}"></div></div>`;
+    }
+    const statusText=profile?.status_text?`<div class="mem-al">${profile.status_emoji||''} ${profile.status_text}</div>`:'';
+    el.innerHTML=`${avaHtml}
+      <div class="mem-inf">
+        <div class="mem-nm" style="color:${user.color}">${user.name}${isSelf?'<span style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-left:4px">(sen)</span>':''}</div>
+        ${statusText}
+      </div>
+      ${!isSelf?`<button class="mem-pm-btn" title="PM gönder" onclick="PM.open('${user.id}')"><i class="fas fa-comment"></i></button>`:''}
+      ${isSelf?`<button class="mem-pm-btn" title="Profili düzenle" onclick="PlayerProfile.open('${user.id}')"><i class="fas fa-edit"></i></button>`:''}`;
+    // Click → open profile
+    el.querySelector('.mem-inf').onclick=()=>PlayerProfile.open(user.id);
+    list.appendChild(el);
   },
   updChar(char){
     const org=RP._org((char.organizations||[])[0]||char.organization);
@@ -1443,6 +1534,360 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.mbd').forEach(el=>el.classList.add('hidden'));if(typeof Autocomplete!=='undefined')Autocomplete.hide();}});
   Login.init();
 });
+
+/* ═══ PLAYER PROFILE SYSTEM ══════════════════════════════ */
+const PlayerProfile={
+  _loading:false,
+
+  async open(userId){
+    const user=USERS?.find(u=>u.id===userId)||{id:userId,name:userId,color:'var(--ac)'};
+    const isSelf=S.user?.id===userId;
+    const profile=S.playerProfiles[userId]||{};
+
+    let modal=document.getElementById('m-player-profile');
+    if(!modal){
+      modal=document.createElement('div');modal.id='m-player-profile';modal.className='mbd hidden';
+      modal.innerHTML=`<div class="mbox" style="max-width:420px">
+        <div class="mhd"><span class="mti" id="pp-title">Profil</span><button class="mcl" onclick="CM('m-player-profile')"><i class="fas fa-times"></i></button></div>
+        <div class="mbdy" id="pp-body"></div>
+        <div class="mft" id="pp-footer"></div>
+      </div>`;
+      document.body.appendChild(modal);
+      modal.addEventListener('click',e=>{if(e.target===modal)CM('m-player-profile');});
+    }
+
+    document.getElementById('pp-title').textContent=isSelf?'Profilini Düzenle':user.name+' Profili';
+    const body=document.getElementById('pp-body');
+    const footer=document.getElementById('pp-footer');
+
+    if(isSelf){
+      // Editable profile
+      body.innerHTML=`
+        <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+          <div id="pp-ava-preview" style="width:64px;height:64px;border-radius:50%;background:${user.color}22;border:3px solid ${user.color}44;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;color:${user.color};overflow:hidden;flex-shrink:0">
+            ${this._renderAvaPreview(profile,user)}
+          </div>
+          <div style="flex:1">
+            <div style="font-size:16px;font-weight:600;color:${user.color};margin-bottom:2px">${user.name}</div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--t2)">${user.role||'Admin'}</div>
+          </div>
+        </div>
+        <div class="ff">
+          <label class="fl">Avatar Tipi</label>
+          <select id="pp-ava-type" class="fi-inp" style="font-family:var(--mono)" onchange="PlayerProfile._updatePreview()">
+            <option value="initials" ${profile.avatar_type==='initials'||!profile.avatar_type?'selected':''}>Baş Harf</option>
+            <option value="url" ${profile.avatar_type==='url'?'selected':''}>Resim URL</option>
+            <option value="emoji" ${profile.avatar_type==='emoji'?'selected':''}>Emoji</option>
+          </select>
+        </div>
+        <div class="ff" id="pp-ava-input-wrap">
+          <label class="fl" id="pp-ava-label">Resim URL / Emoji</label>
+          <input id="pp-ava-val" type="text" class="fi-inp" value="${profile.avatar_url||''}" placeholder="https://... veya 🎭" oninput="PlayerProfile._updatePreview()">
+        </div>
+        <div class="ff">
+          <label class="fl">Durum Emoji</label>
+          <input id="pp-status-emoji" type="text" class="fi-inp" value="${profile.status_emoji||''}" placeholder="🎭 🔫 💤 🎲" style="font-size:18px">
+        </div>
+        <div class="ff">
+          <label class="fl">Durum / Bio</label>
+          <input id="pp-status-text" type="text" class="fi-inp" value="${profile.status_text||''}" placeholder="Sahneye hazır..." maxlength="60">
+        </div>`;
+      footer.innerHTML=`
+        <button class="btn btn-g" onclick="CM('m-player-profile')">İptal</button>
+        <button class="btn btn-p" onclick="PlayerProfile.save('${userId}')"><i class="fas fa-save"></i> Kaydet</button>`;
+    }else{
+      // View-only profile + PM button
+      body.innerHTML=`
+        <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+          <div style="width:64px;height:64px;border-radius:50%;background:${user.color}22;border:3px solid ${user.color}44;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;color:${user.color};overflow:hidden;flex-shrink:0">
+            ${this._renderAvaPreview(profile,user)}
+          </div>
+          <div>
+            <div style="font-size:18px;font-weight:700;color:${user.color}">${user.name}</div>
+            ${profile.status_text?`<div style="font-size:13px;color:var(--t1);margin-top:4px">${profile.status_emoji||''} ${profile.status_text}</div>`:''}
+          </div>
+        </div>`;
+      footer.innerHTML=`
+        <button class="btn btn-g" onclick="CM('m-player-profile')">Kapat</button>
+        <button class="btn btn-p" style="background:var(--pu)" onclick="CM('m-player-profile');PM.open('${userId}')"><i class="fas fa-comment"></i> PM Gönder</button>`;
+    }
+
+    OM('m-player-profile');
+  },
+
+  _renderAvaPreview(profile,user){
+    if(profile.avatar_type==='emoji'&&profile.avatar_url) return profile.avatar_url;
+    if(profile.avatar_type==='url'&&profile.avatar_url) return `<img src="${profile.avatar_url}" style="width:100%;height:100%;object-fit:cover" onerror="this.remove()">`;
+    return user.name?.[0]?.toUpperCase()||'?';
+  },
+
+  _updatePreview(){
+    const type=document.getElementById('pp-ava-type')?.value;
+    const val=document.getElementById('pp-ava-val')?.value||'';
+    const user=S.user;if(!user)return;
+    const prev=document.getElementById('pp-ava-preview');if(!prev)return;
+    if(type==='emoji') prev.innerHTML=val||user.name[0];
+    else if(type==='url'&&val) prev.innerHTML=`<img src="${val}" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.parentNode.innerHTML='${user.name[0]}'">`;
+    else prev.innerHTML=user.name[0]?.toUpperCase()||'?';
+  },
+
+  async save(userId){
+    const type=document.getElementById('pp-ava-type')?.value||'initials';
+    const val=(document.getElementById('pp-ava-val')?.value||'').trim();
+    const emoji=(document.getElementById('pp-status-emoji')?.value||'').trim();
+    const status=(document.getElementById('pp-status-text')?.value||'').trim();
+    const user=USERS?.find(u=>u.id===userId)||{};
+    const profileData={
+      user_id:userId,display_name:user.name||userId,
+      avatar_url:val,avatar_type:type,
+      bio:status,status_text:status,status_emoji:emoji,
+      color:user.color||'var(--ac)',updated_at:new Date().toISOString()
+    };
+    try{
+      await DB.upsert('rp_player_profiles','user_id',profileData);
+      S.playerProfiles[userId]=profileData;
+      CM('m-player-profile');
+      UI.renderMembers();
+      toast('Profil güncellendi ✓','success');
+    }catch(e){toast('Kayıt hatası: '+e.message,'error');}
+  },
+
+  async loadAll(){
+    try{
+      const rows=await DB.get('rp_player_profiles?select=*');
+      rows.forEach(r=>{S.playerProfiles[r.user_id]=r;});
+    }catch(e){}
+  }
+};
+
+/* ═══ PM SYSTEM ══════════════════════════════════════════ */
+const PM={
+  _convId:null,
+  _userId:null,
+  _pollTimer:null,
+  _lastId:null,
+
+  async open(targetUserId){
+    const target=USERS?.find(u=>u.id===targetUserId);
+    const me=S.user;
+    if(!me){toast('Giriş yapman lazım','error');return;}
+    if(targetUserId===me.id){toast('Kendinize PM atamazsınız','warn');return;}
+
+    // Create or find conversation (always store user_a < user_b)
+    const ua=me.id<targetUserId?me.id:targetUserId;
+    const ub=me.id<targetUserId?targetUserId:me.id;
+
+    let convId=null;
+    try{
+      let rows=await DB.get(`dm_conversations?user_a=eq.${ua}&user_b=eq.${ub}&select=id`);
+      if(rows.length){convId=rows[0].id;}
+      else{
+        const created=await DB.post('dm_conversations',{user_a:ua,user_b:ub,last_msg:'',last_msg_at:new Date().toISOString(),last_msg_by:me.id});
+        convId=created[0]?.id;
+      }
+    }catch(e){toast('PM açılamadı: '+e.message,'error');return;}
+
+    this._convId=convId;this._userId=targetUserId;
+    this._openWindow(target||{id:targetUserId,name:targetUserId,color:'var(--ac)'},convId);
+  },
+
+  _openWindow(target,convId){
+    let win=document.getElementById('pm-window');
+    if(!win){
+      win=document.createElement('div');win.id='pm-window';win.className='pm-window';
+      win.innerHTML=`
+        <div class="pm-header">
+          <div class="pm-header-ava" id="pm-target-ava"></div>
+          <div style="flex:1;min-width:0">
+            <div class="pm-target-name" id="pm-target-name"></div>
+          </div>
+          <button onclick="PM.close()" style="background:none;border:none;color:var(--t2);cursor:pointer;font-size:14px;padding:4px">✕</button>
+        </div>
+        <div class="pm-messages" id="pm-messages"><div style="text-align:center;padding:20px;font-family:var(--mono);font-size:11px;color:var(--t3)">Yükleniyor…</div></div>
+        <div class="pm-input-row">
+          <input id="pm-input" class="pm-input" type="text" placeholder="Mesaj yaz…" onkeydown="if(event.key==='Enter')PM.send()">
+          <button class="pm-send-btn" onclick="PM.send()"><i class="fas fa-paper-plane"></i></button>
+        </div>`;
+      document.body.appendChild(win);
+    }
+    // Update header
+    const profile=S.playerProfiles[target.id]||{};
+    const avaEl=document.getElementById('pm-target-ava');
+    if(profile.avatar_type==='emoji'&&profile.avatar_url) avaEl.textContent=profile.avatar_url;
+    else if(profile.avatar_type==='url'&&profile.avatar_url) avaEl.innerHTML=`<img src="${profile.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;
+    else avaEl.textContent=target.name[0]?.toUpperCase()||'?';
+    avaEl.style.cssText=`width:28px;height:28px;border-radius:50%;background:${target.color}22;border:2px solid ${target.color}44;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:${target.color};overflow:hidden;flex-shrink:0`;
+    document.getElementById('pm-target-name').textContent=target.name;
+    document.getElementById('pm-target-name').style.color=target.color;
+    win.style.display='flex';
+    this._loadMessages(convId);
+    clearInterval(this._pollTimer);
+    this._pollTimer=setInterval(()=>this._pollMessages(convId),3000);
+    setTimeout(()=>document.getElementById('pm-input')?.focus(),100);
+  },
+
+  async _loadMessages(convId){
+    const msgEl=document.getElementById('pm-messages');if(!msgEl)return;
+    try{
+      const rows=await DB.get(`dm_messages?conversation_id=eq.${convId}&is_deleted=eq.false&order=created_at.asc&limit=100`);
+      this._lastId=rows.length?rows[rows.length-1].id:null;
+      this._renderMessages(rows);
+    }catch(e){msgEl.innerHTML='<div style="text-align:center;padding:20px;font-family:var(--mono);font-size:11px;color:var(--rd)">Yüklenemedi</div>';}
+  },
+
+  async _pollMessages(convId){
+    if(!convId)return;
+    try{
+      const qs=this._lastId
+        ?`dm_messages?conversation_id=eq.${convId}&id=gt.${this._lastId}&is_deleted=eq.false&order=created_at.asc`
+        :`dm_messages?conversation_id=eq.${convId}&is_deleted=eq.false&order=created_at.asc&limit=100`;
+      const rows=await DB.get(qs);
+      if(!rows.length)return;
+      this._lastId=rows[rows.length-1].id;
+      rows.forEach(msg=>this._appendMessage(msg));
+    }catch(e){}
+  },
+
+  _renderMessages(msgs){
+    const el=document.getElementById('pm-messages');if(!el)return;
+    el.innerHTML='';
+    if(!msgs.length){el.innerHTML='<div style="text-align:center;padding:20px;font-family:var(--mono);font-size:11px;color:var(--t3)">Henüz mesaj yok</div>';return;}
+    msgs.forEach(m=>this._appendMessage(m,false));
+    setTimeout(()=>{el.scrollTop=el.scrollHeight;},50);
+  },
+
+  _appendMessage(msg,scroll=true){
+    const el=document.getElementById('pm-messages');if(!el)return;
+    const isMine=msg.sender_id===S.user?.id;
+    const user=USERS?.find(u=>u.id===msg.sender_id)||{name:msg.sender_name,color:'var(--ac)'};
+    const time=new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    const msgEl=document.createElement('div');
+    msgEl.className='pm-msg '+(isMine?'pm-msg-mine':'pm-msg-theirs');
+    msgEl.innerHTML=`
+      ${!isMine?`<div class="pm-msg-sender" style="color:${user.color}">${user.name}</div>`:''}
+      <div class="pm-bubble" style="${isMine?`background:${S.user?.color||'var(--ac)'}22;border-color:${S.user?.color||'var(--ac)'}44`:''}">
+        ${msg.content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+      </div>
+      <div class="pm-msg-time">${time}</div>`;
+    el.appendChild(msgEl);
+    const emp=el.querySelector('div[style*="text-align:center"]');
+    emp?.remove();
+    if(scroll)el.scrollTop=el.scrollHeight;
+  },
+
+  async send(){
+    const inp=document.getElementById('pm-input');
+    const txt=inp?.value.trim();
+    if(!txt||!this._convId||!S.user)return;
+    inp.value='';
+    const me=S.user;
+    const profile=S.playerProfiles[me.id]||{};
+    try{
+      await DB.post('dm_messages',{
+        conversation_id:this._convId,
+        sender_id:me.id,sender_name:me.name,
+        sender_avatar:profile.avatar_url||'',
+        content:txt,is_read:false
+      });
+      // Update conversation last_msg
+      await DB.patch('dm_conversations',`id=eq.${this._convId}`,{
+        last_msg:txt.slice(0,100),last_msg_at:new Date().toISOString(),last_msg_by:me.id
+      }).catch(()=>{});
+    }catch(e){toast('PM gönderilemedi','error');}
+  },
+
+  close(){
+    clearInterval(this._pollTimer);
+    const win=document.getElementById('pm-window');
+    if(win)win.style.display='none';
+    this._convId=null;this._userId=null;this._lastId=null;
+  }
+};
+
+// Load player profiles when Login completes
+const _origLoginStart=Login._start.bind(Login);
+Login._start=async function(u){
+  _origLoginStart(u);
+  await PlayerProfile.loadAll();
+  // Also start presence heartbeat for the logged-in player
+  setInterval(()=>{
+    if(S.user&&!S._off){
+      DB.upsert('rp_presence','char_id',{
+        char_id:'player_'+S.user.id,
+        char_name:S.user.name,
+        char_alias:'',org_id:null,
+        last_seen:new Date().toISOString(),
+        is_typing:false,room_id:S.roomId,
+        reader_user_id:S.user.id
+      }).catch(()=>{});
+    }
+  },20000);
+};
+</script>
+
+<style>
+/* ── Message: player as sender ──────────────────────── */
+.msg-player-ava-wrap{cursor:pointer}
+.msg-player-ava{
+  width:36px;height:36px;border-radius:50%;
+  background:var(--bg4);border:2px solid var(--ln2);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:14px;font-weight:700;
+  color:var(--t1);overflow:hidden;transition:opacity var(--tr);
+}
+.msg-player-ava:hover{opacity:.8}
+.msg-player-ava img{width:100%;height:100%;object-fit:cover;display:block}
+.msg-player-name{
+  font-size:13px;font-weight:700;cursor:pointer;
+}
+.msg-player-name:hover{text-decoration:underline}
+.msg-char-list{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px}
+.msg-char-tag{
+  font-size:13px;font-weight:500;color:var(--t0);
+  cursor:pointer;display:inline-flex;align-items:center;gap:4px;
+}
+.msg-char-tag:hover .msg-char-name-inner{text-decoration:underline}
+.msg-char-alias{font-family:var(--mono);font-size:11px;color:var(--t3)}
+.msg-org{font-family:var(--mono);font-size:9px;font-weight:600;padding:1px 5px;border-radius:2px;letter-spacing:.06em;text-transform:uppercase}
+/* ── Members panel player items ─────────────────────── */
+.mem-pm-btn{
+  width:24px;height:24px;border-radius:50%;
+  background:none;border:1px solid var(--ln2);color:var(--t2);
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  font-size:11px;transition:all .15s;flex-shrink:0;
+}
+.mem-pm-btn:hover{background:var(--ac-d);border-color:var(--ac);color:var(--ac)}
+/* ── PM Window ──────────────────────────────────────── */
+.pm-window{
+  position:fixed;bottom:20px;right:20px;width:320px;height:440px;
+  background:var(--bg2);border:1px solid var(--ln2);border-radius:12px;
+  box-shadow:0 16px 48px rgba(0,0,0,.6);z-index:500;
+  display:none;flex-direction:column;overflow:hidden;
+}
+.pm-header{
+  display:flex;align-items:center;gap:10px;padding:12px 14px;
+  border-bottom:1px solid var(--ln);flex-shrink:0;background:var(--bg1);
+}
+.pm-target-name{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pm-messages{flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.pm-input-row{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--ln);flex-shrink:0}
+.pm-input{flex:1;background:var(--bg3);border:1px solid var(--ln2);border-radius:20px;color:var(--t0);font-family:var(--sans);font-size:13px;padding:6px 12px;outline:none}
+.pm-input:focus{border-color:var(--ac)}
+.pm-send-btn{width:32px;height:32px;border-radius:50%;background:var(--ac);color:#fff;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.pm-send-btn:hover{opacity:.88}
+.pm-msg{display:flex;flex-direction:column;gap:2px}
+.pm-msg-mine{align-items:flex-end}
+.pm-msg-theirs{align-items:flex-start}
+.pm-msg-sender{font-family:var(--mono);font-size:10px;font-weight:600;margin-bottom:2px}
+.pm-bubble{
+  max-width:220px;padding:8px 12px;border-radius:12px;
+  background:var(--bg3);border:1px solid var(--ln);
+  font-size:13px;color:var(--t0);line-height:1.5;word-break:break-word;
+}
+.pm-msg-mine .pm-bubble{border-radius:12px 12px 2px 12px}
+.pm-msg-theirs .pm-bubble{border-radius:12px 12px 12px 2px}
+.pm-msg-time{font-family:var(--mono);font-size:9px;color:var(--t3)}
+</style>
 </script>
 
 <!-- ══════════════════════════════════════════════════════
