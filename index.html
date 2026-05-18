@@ -726,10 +726,16 @@ const RP={
     if(!S._off)try{await DB.patch('rp_messages',`id=eq.${id}`,{content:newTxt.trim(),is_edited:true});}catch(e){}
   },
   async delMsg(id){
-    if(!S.msgs[S.roomId])return;
-    S.msgs[S.roomId]=S.msgs[S.roomId].filter(m=>m.id!=id);
+    // Remove locally first (instant feedback)
+    if(S.msgs[S.roomId])
+      S.msgs[S.roomId]=S.msgs[S.roomId].filter(m=>m.id!=id);
     document.querySelector(`[data-msg-id="${id}"]`)?.remove();
-    if(!S._off)try{await DB.patch('rp_messages',`id=eq.${id}`,{is_deleted:true});}catch(e){}
+    // Patch DB — realtime PATCH event will propagate to others
+    if(!S._off){
+      try{
+        await DB.patch('rp_messages',`id=eq.${id}`,{is_deleted:true});
+      }catch(e){ toast('Silinemedi','error'); }
+    }
   },
   async react(msgId,emoji){
     if(!S.activeChar)return;
@@ -764,10 +770,37 @@ const RP={
   clearReply(){S.reply=null;document.getElementById('reply-bar').classList.remove('show');},
   fwdMsg(d){
     const list=document.getElementById('fwd-list');list.innerHTML='';
-    S.rooms.forEach(room=>{
-      if(room.id==S.roomId)return;
+
+    // ── PM ile ilet butonu ─────────────────────────────
+    const pmSection=document.createElement('div');
+    pmSection.style.cssText='margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--ln)';
+    pmSection.innerHTML=`<div style="font-family:var(--mono);font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">PM İle İlet</div>`;
+    (USERS||[]).filter(u=>u.id!==S.user?.id).forEach(u=>{
       const btn=document.createElement('button');
-      btn.style.cssText='width:100%;display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg3);border:1px solid var(--ln);border-radius:var(--r);color:var(--t0);cursor:pointer;font-size:13px;transition:background .12s';
+      btn.style.cssText='width:100%;display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg3);border:1px solid var(--ln);border-radius:var(--r);color:var(--t0);cursor:pointer;font-size:13px;margin-bottom:4px;transition:background .12s';
+      btn.innerHTML=`<span style="width:10px;height:10px;border-radius:50%;background:${u.color};flex-shrink:0;display:inline-block"></span>${u.name}`;
+      btn.onmouseenter=()=>btn.style.background='var(--bg4)';btn.onmouseleave=()=>btn.style.background='var(--bg3)';
+      btn.onclick=async()=>{
+        CM('m-forward');
+        await PM.open(u.id);
+        // After PM window opens, pre-fill the message
+        setTimeout(()=>{
+          const inp=document.getElementById('pm-input');
+          if(inp){inp.value=`↗ "${d.content?.slice(0,80)||''}"`;inp.focus();}
+        },200);
+      };
+      pmSection.appendChild(btn);
+    });
+    list.appendChild(pmSection);
+
+    // ── Oda ile ilet ──────────────────────────────────
+    const roomSection=document.createElement('div');
+    roomSection.innerHTML=`<div style="font-family:var(--mono);font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Odaya İlet</div>`;
+    let hasRooms=false;
+    S.rooms.filter(r=>!r.is_archived&&r.id!=S.roomId).forEach(room=>{
+      hasRooms=true;
+      const btn=document.createElement('button');
+      btn.style.cssText='width:100%;display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg3);border:1px solid var(--ln);border-radius:var(--r);color:var(--t0);cursor:pointer;font-size:13px;transition:background .12s;margin-bottom:4px';
       btn.innerHTML=`<span style="font-family:var(--mono);color:var(--t3)">#</span>${room.name}`;
       btn.onmouseenter=()=>btn.style.background='var(--bg4)';btn.onmouseleave=()=>btn.style.background='var(--bg3)';
       btn.onclick=async()=>{
@@ -779,8 +812,10 @@ const RP={
           toast(`#${room.name} odasına iletildi`,'success');
         }catch(e){toast('İletilemedi','error');}
       };
-      list.appendChild(btn);
+      roomSection.appendChild(btn);
     });
+    if(!hasRooms) roomSection.innerHTML+='<div style="font-family:var(--mono);font-size:11px;color:var(--t3);padding:4px">Başka oda yok</div>';
+    list.appendChild(roomSection);
     OM('m-forward');
   },
   async createRoom(){
@@ -1017,21 +1052,41 @@ const RT={
       const ws=new WebSocket(wsUrl);
       this.ws=ws;
       ws.onopen=()=>{
+        // Subscribe to messages in current room
         ws.send(JSON.stringify({topic:`realtime:public:rp_messages:room_id=eq.${roomId}`,event:'phx_join',payload:{},ref:1}));
+        // Subscribe to presence (for typing indicators)
+        ws.send(JSON.stringify({topic:`realtime:public:rp_presence`,event:'phx_join',payload:{},ref:2}));
+        // Subscribe to PM messages for current user
+        if(S.user){
+          ws.send(JSON.stringify({topic:`realtime:public:dm_messages`,event:'phx_join',payload:{},ref:3}));
+        }
         // Keep-alive ping every 25s
         this._pingTimer=setInterval(()=>{try{ws.send(JSON.stringify({topic:'phoenix',event:'heartbeat',payload:{},ref:0}));}catch(e){}},25000);
       };
       ws.onmessage=e=>{
         try{
           const m=JSON.parse(e.data);
-          if(m.event==='INSERT'&&m.topic?.includes('rp_messages')){
-            this._wsAlive=true; // WS is alive
-            this._handleMsg(m.payload.record);
+          if(m.topic?.includes('rp_messages')){
+            if(m.event==='INSERT'){ this._wsAlive=true; this._handleMsg(m.payload.record); }
+            // Handle soft-delete propagation
+            if(m.event==='UPDATE'&&m.payload.record?.is_deleted){
+              this._wsAlive=true;
+              const id=m.payload.record.id;
+              // Remove from all room caches
+              Object.keys(S.msgs).forEach(rid=>{
+                S.msgs[rid]=S.msgs[rid].filter(msg=>msg.id!=id);
+              });
+              document.querySelector(`[data-msg-id="${id}"]`)?.remove();
+            }
           }
-          // Also handle presence inserts via WS
           if(m.event==='INSERT'&&m.topic?.includes('rp_presence')){
             this._wsAlive=true;
             this._handlePresence(m.payload.record);
+          }
+          // PM new message via WS
+          if(m.event==='INSERT'&&m.topic?.includes('dm_messages')){
+            this._wsAlive=true;
+            this._handlePM(m.payload.record);
           }
         }catch(ex){}
       };
@@ -1108,10 +1163,144 @@ const RT={
     this.lastId=rec.id;
     UI.append(rec);
     document.getElementById('empty-state')?.remove();
-    // Clear typing indicator for this char when they send
     if(rec.char_id){ delete S.typing[rec.char_id]; UI.renderTyping(); }
     OAI.Batcher.ingest([rec]);
-  }
+    // Notify if from someone else
+    if(rec.sent_by_user&&rec.sent_by_user!==S.user?.id){
+      const room=S.rooms.find(r=>r.id==S.roomId);
+      const sender=USERS?.find(u=>u.id===rec.sent_by_user);
+      Notif.show({
+        title:`${sender?.name||rec.char_name} — #${room?.name||'chat'}`,
+        body: rec.content?.slice(0,80)||'',
+        type:'message',
+      });
+    }
+  },
+
+  _handlePM(rec){
+    // Only handle PM if it's for current user
+    if(!S.user)return;
+    // Check if this conv involves current user
+    PM._pollMessages(PM._convId); // refresh PM window if open
+    // Notify if not from self
+    if(rec.sender_id!==S.user.id){
+      const sender=USERS?.find(u=>u.id===rec.sender_id);
+      Notif.show({
+        title:`💬 ${sender?.name||rec.sender_name} — PM`,
+        body: rec.content?.slice(0,80)||'',
+        type:'pm',
+        onClick:()=>PM.open(rec.sender_id),
+      });
+      // Badge on PM window button if closed
+      const pmWin=document.getElementById('pm-window');
+      if(!pmWin||pmWin.style.display==='none'){
+        Notif.pmBadge(rec.sender_id);
+      }
+    }
+  },
+};
+
+/* ═══ NOTIFICATIONS ════════════════════════════════════════ */
+const Notif={
+  _permitted:false,
+  _sound:null,
+  _badges:{}, // { userId: count }
+
+  async init(){
+    // Request permission
+    if('Notification' in window){
+      if(Notification.permission==='granted') this._permitted=true;
+      else if(Notification.permission!=='denied'){
+        const p=await Notification.requestPermission();
+        this._permitted=p==='granted';
+      }
+    }
+    // Init audio context for notification sound
+    this._initSound();
+  },
+
+  _initSound(){
+    // Create a subtle notification beep using Web Audio API
+    this._audioCtx=null;
+    // Lazy init on first user interaction (browser policy)
+    const initAudio=()=>{
+      if(this._audioCtx)return;
+      try{
+        this._audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+      }catch(e){}
+      document.removeEventListener('click',initAudio);
+    };
+    document.addEventListener('click',initAudio,{once:true});
+  },
+
+  _playSound(type='message'){
+    if(!this._audioCtx)return;
+    try{
+      const ctx=this._audioCtx;
+      const osc=ctx.createOscillator();
+      const gain=ctx.createGain();
+      osc.connect(gain);gain.connect(ctx.destination);
+      if(type==='pm'){
+        // Two-tone for PM
+        osc.frequency.setValueAtTime(880,ctx.currentTime);
+        osc.frequency.setValueAtTime(1100,ctx.currentTime+0.1);
+        gain.gain.setValueAtTime(0.15,ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.3);
+        osc.start(ctx.currentTime);osc.stop(ctx.currentTime+0.3);
+      }else{
+        // Single soft ping for messages
+        osc.frequency.setValueAtTime(660,ctx.currentTime);
+        gain.gain.setValueAtTime(0.1,ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.2);
+        osc.start(ctx.currentTime);osc.stop(ctx.currentTime+0.2);
+      }
+    }catch(e){}
+  },
+
+  show({title,body,type='message',onClick=null}){
+    // Don't notify if page is focused
+    if(document.hasFocus()&&type==='message')return;
+
+    // Play sound
+    this._playSound(type);
+
+    // Browser/desktop notification
+    if(this._permitted&&'Notification' in window&&document.hidden){
+      try{
+        const n=new Notification(title,{
+          body,
+          icon:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="%230c0c0f"/><text x="16" y="22" text-anchor="middle" font-size="18">🗽</text></svg>',
+          silent:true, // We handle sound ourselves
+          tag:type, // Replace same-type notifications
+        });
+        if(onClick) n.onclick=()=>{ window.focus(); onClick(); n.close(); };
+        setTimeout(()=>n.close(),5000);
+      }catch(e){}
+    }
+
+    // In-app toast for non-PM when focused
+    if(document.hasFocus()&&type==='pm'){
+      const t=document.createElement('div');
+      t.className='notif-toast';
+      t.innerHTML=`<div style="font-weight:600;color:var(--pu);margin-bottom:2px">${title}</div><div style="font-size:12px;color:var(--t1)">${body}</div>`;
+      t.onclick=()=>{ t.remove(); if(onClick)onClick(); };
+      document.getElementById('toast-con').appendChild(t);
+      setTimeout(()=>t.remove(),5000);
+    }
+  },
+
+  pmBadge(userId){
+    this._badges[userId]=(this._badges[userId]||0)+1;
+    // Show badge count on members panel PM button
+    const btns=document.querySelectorAll(`.mem-pm-btn`);
+    // We can't easily target per-user here so just pulse the members header
+    const cnt=document.getElementById('mem-cnt');
+    if(cnt){cnt.style.color='var(--pu)';setTimeout(()=>cnt.style.color='',3000);}
+  },
+
+  clearBadge(userId){
+    delete this._badges[userId];
+  },
 };
 
 /* ═══ UI ════════════════════════════════════════════════ */
@@ -1957,6 +2146,8 @@ const _origLoginStart=Login._start.bind(Login);
 Login._start=async function(u){
   _origLoginStart(u);
   await PlayerProfile.loadAll();
+  // Init notifications
+  Notif.init();
   // Player presence heartbeat — fires every 10s so others see us online quickly
   const sendPlayerHB=()=>{
     if(!S.user||S._off)return;
@@ -2037,6 +2228,15 @@ Login._start=async function(u){
 .pm-msg-mine .pm-bubble{border-radius:12px 12px 2px 12px}
 .pm-msg-theirs .pm-bubble{border-radius:12px 12px 12px 2px}
 .pm-msg-time{font-family:var(--mono);font-size:9px;color:var(--t3)}
+/* ── Notification toast ─────────────────────────────── */
+.notif-toast{
+  background:var(--bg2);border:1px solid rgba(155,111,212,.5);
+  border-radius:8px;padding:10px 14px;cursor:pointer;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);
+  animation:tin .25s ease;pointer-events:all;
+  max-width:300px;
+}
+.notif-toast:hover{background:var(--bg3)}
 </style>
 </script>
 
