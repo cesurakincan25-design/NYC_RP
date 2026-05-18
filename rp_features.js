@@ -831,19 +831,21 @@ const ReadReceipts = {
       const cut = new Date(Date.now() - 120000).toISOString();
       const rows = await DB.get(
         `rp_presence?last_seen=gte.${cut}&room_id=eq.${S.roomId}` +
-        `&select=char_id,char_name,char_avatar,last_read_msg_id,reader_user_id,last_seen`
+        `&select=char_id,char_name,last_read_msg_id,reader_user_id,last_seen`
       ).catch(() => []);
 
       rows.forEach(r => {
         if (!r.last_read_msg_id) return;
-        if (r.reader_user_id === S.user?.id) return; // skip self
+        if (r.reader_user_id === S.user?.id) return;
         const user = USERS?.find(u => u.id === r.reader_user_id);
         if (!user) return;
+        // Get char avatar from S.ci cache instead of presence
+        const char = S.ci.get(r.char_id);
         this._state[r.reader_user_id] = {
           msgId:      r.last_read_msg_id,
           charId:     r.char_id,
           charName:   r.char_name,
-          charAvatar: r.char_avatar || '',
+          charAvatar: char?.image || '',
           userColor:  user.color,
           userName:   user.name,
           seenAt:     new Date(r.last_seen).getTime(),
