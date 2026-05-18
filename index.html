@@ -120,6 +120,8 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 .msg-edited{font-family:var(--mono);font-size:9px;color:var(--t3);margin-left:3px}
 .msg-text{font-size:13.5px;color:var(--t1);line-height:1.6;word-break:break-word;white-space:pre-wrap}
 .emote{color:#c084fc;font-style:italic}
+.inline-tag{display:inline-flex;align-items:center;padding:1px 7px;border-radius:20px;font-size:11px;font-weight:600;font-family:var(--mono);cursor:pointer;transition:opacity .12s;white-space:nowrap;user-select:none}
+.inline-tag:hover{opacity:.75}
 .speaker{font-weight:600;color:var(--t0)}
 .tag-badge{display:inline-flex;align-items:center;font-family:var(--mono);font-size:9px;font-weight:700;padding:1px 5px;border-radius:2px;background:rgba(74,143,226,.15);color:var(--ac);border:1px solid rgba(74,143,226,.3);letter-spacing:.06em;text-transform:uppercase;margin:0 2px;vertical-align:middle}
 .msg-attach{margin-top:6px;max-width:360px;border-radius:var(--r);overflow:hidden;border:1px solid var(--ln)}
@@ -1365,15 +1367,67 @@ const UI={
   _rc(raw){
     if(!raw)return'';
     let t=raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    /* [kısa tag] → badge */
+
+    /* [Araç/Org/Mülk/Ekipman: İsim] → renkli tıklanabilir chip */
+    const tagTypes={
+      'Araç':'#e8a74a','Org':'#4a8fe2','Mülk':'#9b6fd4',
+      'Ekipman':'#4db880','Karakter':'#c084fc'
+    };
+    t=t.replace(/\[(Araç|Org|Mülk|Ekipman|Karakter):([^\]]+)\]/g,(full,type,name)=>{
+      const color=tagTypes[type]||'var(--t2)';
+      const n=name.trim().replace(/"/g,'&quot;');
+      return `<span class="inline-tag" style="background:${color}18;color:${color};border:1px solid ${color}44" `+
+        `data-tag-type="${type}" data-tag-name="${n}" `+
+        `onclick="UI.inlineTagClick(event,'${type}','${n}')" `+
+        `oncontextmenu="event.preventDefault();UI.inlineTagMenu(event,'${type}','${n}')">` +
+        `<i class="fas fa-${type==='Araç'?'car':type==='Org'?'building':type==='Mülk'?'home':type==='Ekipman'?'box':'user'}" style="font-size:9px;margin-right:3px"></i>${n}</span>`;
+    });
+
+    /* [kısa tag T/OOC vs] → badge */
     t=t.replace(/\[([A-Za-zÇĞİÖŞÜçğışöü0-9!?\s]{1,6})\]/g,(_,tag)=>`<span class="tag-badge">${tag.trim()}</span>`);
     /* [uzun köşeli] → emote */
     t=t.replace(/\[([^\]]{7,300})\]/g,(_,inner)=>`<span class="emote">[${inner}]</span>`);
     /* *yıldız* */
     t=t.replace(/\*(.*?)\*/g,'<em style="color:var(--t2)">*$1*</em>');
-    /* Karakter: diyalog */
-    t=t.replace(/^([A-Za-zÇĞİÖŞÜçğışöü][A-Za-zÇĞİÖŞÜçğışöü\s\.]{1,30}):\s/gm,(m,name)=>S.cni.has(name.trim().toLowerCase())?`<span class="speaker">${name}:</span> `:m);
+    /* Karakter: diyalog — tıklanabilir isim */
+    t=t.replace(/^([A-Za-zÇĞİÖŞÜçğışöü][A-Za-zÇĞİÖŞÜçğışöü\s\.]{1,30}):\s/gm,(m,name)=>{
+      const key=name.trim().toLowerCase();
+      if(!S.cni.has(key))return m;
+      const char=S.cni.get(key);
+      return `<span class="speaker" data-char-id="${char?.id||''}" `+
+        `onclick="if(typeof CharCard!=='undefined')CharCard.show('${char?.id||''}',event.clientX,event.clientY)" `+
+        `oncontextmenu="event.preventDefault();UI.charContextMenu(event,'${char?.id||''}','${name.trim().replace(/'/g,"\\'")}')">`+
+        `${name}:</span> `;
+    });
     return t.replace(/\n/g,'<br>');
+  },
+
+  inlineTagClick(e, type, name){
+    // Find entity by name and show card
+    if(typeof CharCard==='undefined')return;
+    e.stopPropagation();
+    let entity=null,eType='char';
+    if(type==='Karakter'){entity=S.chars.find(c=>c.name===name||c.alias===name);eType='char';}
+    else if(type==='Org'){entity=S.orgs.find(o=>o.name===name);eType='org';}
+    else if(type==='Araç'){entity=(S._db?.vehicles||[]).find(v=>(v.name||v.plate)===name);eType='vehicle';}
+    else if(type==='Mülk'){entity=(S._db?.properties||[]).find(p=>p.name===name);eType='prop';}
+    else if(type==='Ekipman'){entity=(S._db?.equipments||[]).find(q=>q.name===name);eType='equip';}
+    if(entity)CharCard.show(entity.id,e.clientX,e.clientY,eType);
+  },
+
+  inlineTagMenu(e, type, name){
+    if(typeof ContextMenu==='undefined')return;
+    let entity=null,eType='char';
+    if(type==='Karakter'){entity=S.chars.find(c=>c.name===name||c.alias===name);eType='char';}
+    else if(type==='Org'){entity=S.orgs.find(o=>o.name===name);eType='org';}
+    else if(type==='Araç'){entity=(S._db?.vehicles||[]).find(v=>(v.name||v.plate)===name);eType='vehicle';}
+    else if(type==='Mülk'){entity=(S._db?.properties||[]).find(p=>p.name===name);eType='prop';}
+    else if(type==='Ekipman'){entity=(S._db?.equipments||[]).find(q=>q.name===name);eType='equip';}
+    if(!entity)return;
+    ContextMenu.show(e.clientX,e.clientY,[
+      {icon:'fa-id-card',label:'Profil Kartı',action:()=>CharCard.show(entity.id,e.clientX,e.clientY,eType)},
+      {icon:'fa-external-link-alt',label:"DB'de Aç",action:()=>CharCard.openInDB(entity.id,eType)},
+    ]);
   },
   append(msg,scroll=true,forceNS=null,isFav=false){
     const list=document.getElementById('messages-list');
