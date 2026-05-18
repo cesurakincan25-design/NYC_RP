@@ -22,30 +22,33 @@
 'use strict';
 
 /* ════════════════════════════════════════════════════════
-   CONFIG CONTRACT
-   Caller must set window.DM_CONFIG before loading this file.
-   nyc_rp.html sets it from RPCONFIG + hardcoded keys.
+   CONFIG — lazy getter, reads window.DM_CONFIG at call time
+   so it works regardless of script load order
 ════════════════════════════════════════════════════════ */
-const DM_CFG = window.DM_CONFIG || {};
+const DM_CFG = new Proxy({}, {
+  get(_, key) {
+    return (window.DM_CONFIG || {})[key];
+  }
+});
 
 const DM = {
-  SUPA_URL:   DM_CFG.supaUrl   || '',
-  SUPA_KEY:   DM_CFG.supaKey   || '',
-  GEM_KEY:    DM_CFG.geminiKey || '',
-  GEM_MODEL:  DM_CFG.geminiModel || 'gemini-1.5-flash',
-  WORLD:      DM_CFG.world     || 'nyc',   // 'nyc' | 'tokyo'
-  WORLD_NAME: DM_CFG.worldName || 'NYC',
-  DB_TABLE:   DM_CFG.dbTable   || 'nyc_db',
-  OPERATOR:   DM_CFG.operator  || 'dm',
-
-  // How many messages before auto-read
-  READ_INTERVAL: DM_CFG.readInterval || 25,
+  get SUPA_URL()   { return window.DM_CONFIG?.supaUrl    || ''; },
+  get SUPA_KEY()   { return window.DM_CONFIG?.supaKey    || ''; },
+  get GEM_KEY()    { return window.DM_CONFIG?.geminiKey  || ''; },
+  get GEM_MODEL()  { return window.DM_CONFIG?.geminiModel|| 'gemini-1.5-flash'; },
+  get WORLD()      { return window.DM_CONFIG?.world      || 'nyc'; },
+  get WORLD_NAME() { return window.DM_CONFIG?.worldName  || 'NYC'; },
+  get DB_TABLE()   { return window.DM_CONFIG?.dbTable    || 'nyc_db'; },
+  get OPERATOR()   { return window.DM_CONFIG?.operator   || 'dm'; },
+  get READ_INTERVAL(){ return window.DM_CONFIG?.readInterval || 25; },
+  set OPERATOR(v)  { if(window.DM_CONFIG) window.DM_CONFIG.operator = v; },
 
   _msgsSinceRead: 0,
-  _worldCache:    null,   // { characters, organizations } — refreshed hourly
+  _worldCache:    null,
   _worldCacheAt:  0,
   _sessionId:     'main',
 };
+
 
 /* ════════════════════════════════════════════════════════
    SUPABASE HELPERS (standalone — no dependency on nyc_rp.html DB)
@@ -80,16 +83,25 @@ const DMDB = {
   },
 };
 
+
 /* ════════════════════════════════════════════════════════
-   GEMINI CLIENT
+   GEMINI CLIENT — via Supabase Edge Function proxy
+   API key stored as Supabase secret, never exposed to browser
 ════════════════════════════════════════════════════════ */
 const DMGemini = {
+  _url() {
+    return `${DM.SUPA_URL}/functions/v1/gemini-proxy`;
+  },
   async generate(prompt, opts = {}) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${DM.GEM_MODEL}:generateContent?key=${DM.GEM_KEY}`;
-    const r = await fetch(url, {
+    const r = await fetch(this._url(), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type':  'application/json',
+        'apikey':        DM.SUPA_KEY,
+        'Authorization': 'Bearer ' + DM.SUPA_KEY,
+      },
       body: JSON.stringify({
+        model: DM.GEM_MODEL,
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
           temperature:      opts.temperature      ?? 0.75,
@@ -105,7 +117,10 @@ const DMGemini = {
         ],
       }),
     });
-    if (!r.ok) throw new Error(`Gemini ${r.status}: ${await r.text()}`);
+    if (!r.ok) {
+      const errText = await r.text().catch(() => String(r.status));
+      throw new Error(`Gemini proxy ${r.status}: ${errText}`);
+    }
     const d = await r.json();
     const text = d?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error('Gemini returned empty content');
@@ -115,6 +130,7 @@ const DMGemini = {
     return text;
   },
 };
+
 
 /* ════════════════════════════════════════════════════════
    WORLD CONTEXT — loads characters + orgs from main DB
