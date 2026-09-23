@@ -580,7 +580,45 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 /* ═══ CONSTANTS ═════════════════════════════════════════ */
 const SUPA_URL='https://vhzroetspwbwmouqkcxe.supabase.co';
 const SUPA_KEY='sb_publishable_kM788c6s2-mOyndFnIdc1A_EKPSIz8J';
-const GEM_MDL='gemini-2.5-flash';
+const GEM_MDL = () => window.DM_CONFIG?.geminiModel || 'gemini-3.6-flash';
+
+// Shared Gemini REST helper — Observer AI + DM Engine her ikisi de bunu kullanır
+async function _geminiGenerate(prompt, opts={}) {
+  const key   = window.DM_CONFIG?.geminiKey;
+  const model = GEM_MDL();
+  if (!key || key === '__GEMINI_KEY__') throw new Error('Gemini API key eksik');
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature:     opts.temperature     ?? 0.3,
+          topP:            opts.topP            ?? 0.9,
+          maxOutputTokens: opts.maxOutputTokens ?? 2048,
+          responseMimeType: opts.json ? 'application/json' : 'text/plain',
+        },
+        safetySettings: [
+          { category:'HARM_CATEGORY_HARASSMENT',        threshold:'BLOCK_NONE' },
+          { category:'HARM_CATEGORY_HATE_SPEECH',       threshold:'BLOCK_NONE' },
+          { category:'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold:'BLOCK_NONE' },
+          { category:'HARM_CATEGORY_DANGEROUS_CONTENT', threshold:'BLOCK_NONE' },
+        ],
+      }),
+    }
+  );
+  if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(`Gemini ${res.status}: ${e.error?.message||res.statusText}`); }
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Gemini boş yanıt');
+  if (opts.json) {
+    const cleaned = text.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```$/i,'').trim();
+    return JSON.parse(cleaned);
+  }
+  return text;
+}
 // Gemini API key moved to Edge Function (gemini-proxy)
 // Direct key removed for security — calls go via SUPA_URL/functions/v1/gemini-proxy
 const ADM_PASS='1';
@@ -2072,22 +2110,37 @@ const OAI={
       const orgs=S.orgs.map(o=>`• ${o.name} [${o.id}]`).join('\n');
       const tr=messages.map(m=>{const t=new Date(m.created_at).toISOString().slice(11,16);return `[${t}] ${m.char_name}${m.char_alias?` "${m.char_alias}"`:''}${m.org_name?` [${m.org_name}]`:''}: ${m.content}`;}).join('\n');
       const prompt=`You are NYC_DB Observer AI. Observe only. Return ONLY valid JSON.\nROSTER:\nCHARACTERS:\n${chars}\nORGANIZATIONS:\n${orgs}\nTRANSCRIPT:\n${tr}\nRespond:{"session_summary":{"title":"","summary":"","involved_chars":[],"involved_orgs":[],"significance":"low"},"incidents":[{"title":"","incident_type":"confrontation","severity":"low","description":"","location_name":"","involved_chars":[],"involved_orgs":[],"source_confidence":0.0}],"character_memories":[{"char_id":"","char_name":"","memory_type":"event","title":"","content":"","emotional_tag":"neutral","importance":50,"about_chars":[]}],"relationship_changes":[{"entity_a_id":"","entity_a_name":"","entity_a_type":"character","entity_b_id":"","entity_b_name":"","entity_b_type":"character","change_type":"neutral","direction":"mutual","trust_delta":0,"description":""}],"flags":{"requires_admin_review":false,"review_reason":""}}`;
-      if(!window._fbAIReady||!window._fbGetModel)throw new Error('Firebase AI hazır değil');
-      const _model=window._fbGetModel(GEM_MDL);
-      const _result=await _model.generateContent({
-        contents:[{role:'user',parts:[{text:prompt}]}],
-        generationConfig:{temperature:0.2,topP:0.8,maxOutputTokens:2048},
-        safetySettings:[{category:'HARM_CATEGORY_HARASSMENT',threshold:'BLOCK_NONE'},{category:'HARM_CATEGORY_HATE_SPEECH',threshold:'BLOCK_NONE'},{category:'HARM_CATEGORY_SEXUALLY_EXPLICIT',threshold:'BLOCK_NONE'},{category:'HARM_CATEGORY_DANGEROUS_CONTENT',threshold:'BLOCK_NONE'}],
-      });
-      const raw=_result?.response?.candidates?.[0]?.content?.parts?.[0]?.text;if(!raw)throw new Error('Gemini empty');
-      const parsed=JSON.parse(raw.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```$/i,'').trim());
+      // Shared Gemini REST — Firebase AI Logic artık kullanılmıyor
+      const parsed = await _geminiGenerate(prompt, { json:true, temperature:0.2, topP:0.8, maxOutputTokens:2048 });
       if(!this.CFG.DRY_RUN){
         let sumId=null;
         if(this.CFG.WRITE_SUMMARIES&&parsed.session_summary){try{const rows=await DB.post('ai_summaries',{summary_type:'rp_session',title:parsed.session_summary.title,content:parsed.session_summary.summary,model_used:GEM_MDL,prompt_version:'phase3_v1',source_type:'rp_messages',source_ids:messages.map(m=>m.id),linked_chars:parsed.session_summary.involved_chars,linked_orgs:parsed.session_summary.involved_orgs,linked_room_id:messages[0]?.room_id||null,covers_from:messages[0]?.created_at,covers_to:messages[messages.length-1]?.created_at,is_published:false,is_reviewed:false});sumId=rows[0]?.id;this.stats.sums++;}catch(e){}}
         if(this.CFG.WRITE_INCIDENTS&&parsed.incidents)for(const inc of parsed.incidents){if((inc.source_confidence||0)<this.CFG.MIN_CONFIDENCE)continue;try{await DB.post('incidents',{title:inc.title,incident_type:inc.incident_type,severity:inc.severity,description:inc.description,location_name:inc.location_name||'',involved_chars:inc.involved_chars||[],involved_orgs:inc.involved_orgs||[],linked_room_id:messages[0]?.room_id||null,source:'ai_agent',created_by:'observer_v1',status:'active'});this.stats.incs++;}catch(e){}}
         if(this.CFG.WRITE_MEMORIES&&parsed.character_memories)for(const mem of parsed.character_memories){try{await DB.post('character_memories',{char_id:mem.char_id,char_name:mem.char_name,memory_type:mem.memory_type,title:mem.title,content:mem.content,emotional_tag:mem.emotional_tag,importance:mem.importance||50,about_chars:mem.about_chars||[],ai_readable:true,source_type:'rp_session',source_id:sumId,experienced_at:messages[messages.length-1]?.created_at});this.stats.mems++;}catch(e){}}
         if(this.CFG.WRITE_REL_CHANGES&&parsed.relationship_changes)for(const rc of parsed.relationship_changes){try{await DB.post('relationship_changes',{...rc,ai_readable:true,source:'ai_agent'});}catch(e){}}
-        try{await DB.post('ai_agent_logs',{agent_id:'observer_v1',agent_name:'NYC Observer AI',run_type:'observation',status:'success',input_msg_count:messages.length,room_id:messages[0]?.room_id||null,covers_from:messages[0]?.created_at,covers_to:messages[messages.length-1]?.created_at,summary_id:sumId,incidents_written:this.stats.incs,memories_written:this.stats.mems,rel_changes_written:0,errors:[],model_used:GEM_MDL});}catch(e){}
+        try{await DB.post('ai_agent_logs',{agent_id:'observer_v1',agent_name:'NYC Observer AI',run_type:'observation',status:'success',input_msg_count:messages.length,room_id:messages[0]?.room_id||null,covers_from:messages[0]?.created_at,covers_to:messages[messages.length-1]?.created_at,summary_id:sumId,incidents_written:this.stats.incs,memories_written:this.stats.mems,rel_changes_written:0,errors:[],model_used:GEM_MDL()});}catch(e){}
+
+        // ── Observer → DM köprüsü ──────────────────────────────────────
+        // Yüksek severity incident varsa DM Engine'e önerir — onay kuyruğuna düşer
+        if(window.DMEngine && parsed.incidents){
+          for(const inc of parsed.incidents){
+            if(!['high','critical'].includes(inc.severity)) continue;
+            if((inc.source_confidence||0) < 0.6) continue;
+            try{
+              // DM'e incident'ı bildir: dispatch veya world event olarak kuyruğa ekle
+              const incText = `${inc.title} — ${inc.description}` +
+                (inc.location_name ? ` (Konum: ${inc.location_name})` : '');
+              await window.DMEngine.generateDispatch(
+                inc.involved_orgs?.[0] || '',
+                inc.incident_type || 'general',
+                incText,                         // incident → dispatch prompt'una gider
+                '[OBS→DM] Observer tespit etti',
+                'observer_ai'
+              );
+              console.log(`[OAI→DM] Incident iletildi: ${inc.title}`);
+            } catch(e){ console.warn('[OAI→DM] Dispatch üretilemedi:', e.message); }
+          }
+        }
       }
       if(parsed.session_summary?.summary)UI.showAI('📋 '+parsed.session_summary.summary);
     }catch(e){console.error('[OAI] Pipeline:',e);this.stats.errors++;}
@@ -2730,6 +2783,16 @@ Login._start=async function(u){
     <button class="adm-btn" style="border-color:rgba(155,111,212,.4);background:rgba(155,111,212,.1);color:var(--pu)" id="dm-read-btn" onclick="DMPanel.readNow()">
       <i class="fas fa-book-open"></i> Şimdi Oku
     </button>
+    <button class="adm-btn" id="dm-auto-btn" onclick="DMPanel.toggleAutoLoop()" style="color:var(--t2)">
+      <i class="fas fa-play-circle"></i> Otomatik: KAPALI
+    </button>
+    <select id="dm-auto-interval" onchange="DMPanel.setAutoInterval(this.value)"
+      style="background:var(--bg2);border:1px solid var(--ln);color:var(--t2);padding:4px 6px;border-radius:6px;font-size:11px;font-family:var(--mono)">
+      <option value="30">30 sn</option>
+      <option value="60" selected>60 sn</option>
+      <option value="120">2 dk</option>
+      <option value="300">5 dk</option>
+    </select>
     <button class="adm-btn" onclick="DMPanel.close()"><i class="fas fa-arrow-left"></i> RP'ye Dön</button>
   </div>
 
