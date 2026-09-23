@@ -315,16 +315,13 @@ const TagSystem = {
   },
 
   async openPicker() {
-    // Lazy load S._db if not loaded yet
+    // Lazy load S._db if not loaded yet (Firebase'den)
     if (!S._db) {
       try {
         const dbTable = window.DM_CONFIG?.dbTable ||
           (typeof SUPA_URL !== 'undefined' && SUPA_URL.includes('nytmjhdxlpttowxogxci') ? 'tokyo_db' : 'nyc_db');
-        const rows = await DB.get(`${dbTable}?id=eq.main&select=data`);
-        if (rows.length) {
-          const d = typeof rows[0].data === 'string' ? JSON.parse(rows[0].data) : rows[0].data;
-          S._db = d;
-        }
+        const d = await window._fbLoadDB(dbTable);
+        if (d) S._db = d;
       } catch(e) { console.warn('[TagSystem] DB load failed:', e); }
     }
     // Build modal if needed
@@ -1172,11 +1169,11 @@ const FEATURE_CSS = `
         try {
           const dbTable = window.DM_CONFIG?.dbTable ||
             (window.SUPA_URL?.includes('nytmjhdxlpttowxogxci') ? 'tokyo_db' : 'nyc_db');
-          const rows = await DB.get(`${dbTable}?id=eq.main&select=data`);
-          if (rows.length) {
-            const d = typeof rows[0].data === 'string' ? JSON.parse(rows[0].data) : rows[0].data;
+          // Firebase'den yükle
+          const d = await window._fbLoadDB(dbTable);
+          if (d) {
             S._db = d;
-            console.log('[rp_features] DB loaded — vehicles:', (d.vehicles||[]).length,
+            console.log('[rp_features] Firebase DB loaded — vehicles:', (d.vehicles||[]).length,
               'properties:', (d.properties||[]).length, 'equipments:', (d.equipments||[]).length);
           }
         } catch(e) { console.warn('[rp_features] DB load failed:', e.message); }
