@@ -2052,7 +2052,7 @@ const UI={
           </span>
           <span class="msg-char-list">
             <span class="msg-char-tag" data-char-id="${msg.char_id||''}"
-              onclick="UI.charPreview('${msg.char_id}')"
+              onclick="UI.charPreview('${msg.char_id}',event,'${(msg.char_name||'').replace(/'/g,"\\'")}')"
               oncontextmenu="event.preventDefault();UI.charContextMenu(event,'${msg.char_id}','${(msg.char_name||'').replace(/'/g,"\\'")}')">
               ${msg.char_name||''}${msg.char_alias?` <span class="msg-char-alias">"${msg.char_alias}"</span>`:''}
               ${msg.org_name?`<span class="msg-org" style="background:${msg.org_color||''}22;color:${msg.org_color||'var(--t2)'};border:1px solid ${msg.org_color||'transparent'}55">${msg.org_name}</span>`:''}
@@ -2206,17 +2206,45 @@ const UI={
       const tag=document.createElement('div');
       tag.className='ctag'+(isP?' ptag':'');
       if(!isP)tag.style.cssText=`background:${orgColor}18;border-color:${orgColor}44;color:${orgColor};`;
-      tag.title=`Tıkla → "${c.name}:" ekle  |  Sağ tık → Primary`;
+      tag.title=`Tıkla → "${c.name}:" prefix  |  Ctrl+Tık → [etiket] ekle  |  Sağ tık → Profil / Primary`;
       tag.innerHTML=`<div class="ctag-ava">${c.image?`<img src="${c.image}" onerror="this.parentNode.innerHTML='${ini}'" loading="lazy">`:ini}</div><span class="ctag-name">${c.name}</span><span class="ctag-rm">✕</span>`;
       tag.addEventListener('click',e=>{
         if(e.target.classList.contains('ctag-rm'))return;
         const inp=document.getElementById('msg-input');
-        const val=inp.value;const prefix=`${c.name}: `;
-        inp.value=(val===''||val.endsWith('\n'))?val+prefix:val+'\n'+prefix;
-        inp.focus();inp.style.height='auto';inp.style.height=Math.min(inp.scrollHeight,160)+'px';
-        inp.selectionStart=inp.selectionEnd=inp.value.length;
+        if(e.ctrlKey||e.metaKey){
+          // Ctrl+tık → [Karakter:İsim] tag ekle
+          const tag=`[Karakter:${c.name}]`;
+          const cur=inp.selectionStart||inp.value.length;
+          const before=inp.value.slice(0,cur);const after=inp.value.slice(cur);
+          inp.value=before+(before&&!before.endsWith(' ')?' ':'')+tag+' '+after;
+          inp.focus();inp.style.height='auto';inp.style.height=Math.min(inp.scrollHeight,160)+'px';
+          inp.selectionStart=inp.selectionEnd=before.length+(before&&!before.endsWith(' ')?1:0)+tag.length+1;
+        } else {
+          // Normal tık → "İsim: " prefix
+          const val=inp.value;const prefix=`${c.name}: `;
+          inp.value=(val===''||val.endsWith('\n'))?val+prefix:val+'\n'+prefix;
+          inp.focus();inp.style.height='auto';inp.style.height=Math.min(inp.scrollHeight,160)+'px';
+          inp.selectionStart=inp.selectionEnd=inp.value.length;
+        }
       });
-      tag.addEventListener('contextmenu',e=>{e.preventDefault();RP.setPrimary(c.id);});
+      tag.addEventListener('contextmenu',e=>{
+        e.preventDefault();
+        if(window.ContextMenu){
+          ContextMenu.show(e.clientX,e.clientY,[
+            {icon:'fa-id-card',label:'Profil Kartı',action:()=>CharCard.show(c.id,e.clientX,e.clientY,'char')},
+            {icon:'fa-star',label:'Primary Yap',action:()=>RP.setPrimary(c.id)},
+            {icon:'fa-hashtag',label:'[Etiket] Ekle',action:()=>{
+              const inp=document.getElementById('msg-input');
+              const t=`[Karakter:${c.name}]`;
+              const cur=inp.selectionStart||inp.value.length;
+              const before=inp.value.slice(0,cur);const after=inp.value.slice(cur);
+              inp.value=before+(before&&!before.endsWith(' ')?' ':'')+t+' '+after;
+              inp.focus();
+            }},
+            {icon:'fa-times',label:'Sahneden Çıkar',action:()=>RP.removeChar(c.id)},
+          ]);
+        } else { RP.setPrimary(c.id); }
+      });
       tag.querySelector('.ctag-rm').addEventListener('click',e=>{e.stopPropagation();RP.removeChar(c.id);});
       bar.appendChild(tag);
     });
@@ -2265,9 +2293,15 @@ const UI={
     const el=document.querySelector(`[data-msg-id="${id}"]`);
     if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.style.background='rgba(74,143,226,.1)';setTimeout(()=>el.style.background='',1500);}
   },
-  charPreview(id){
+  charPreview(id, e, fallbackName){
     const c=S.ci?.get(id)||S.chars?.find(x=>String(x.id)===String(id));
-    if(c) CharCard.show(id, null, null, 'char');
+    const x=e?.clientX||null, y=e?.clientY||null;
+    if(c){
+      CharCard.show(id, x, y, 'char');
+    } else if(fallbackName){
+      // NPC veya bilinmeyen — isimle minimal popup göster
+      CharCard._npcPopup(fallbackName, x, y);
+    }
   },
   reactPicker(e,msgId){
     e.stopPropagation();document.querySelectorAll('.react-popup').forEach(el=>el.remove());
@@ -2364,6 +2398,29 @@ const CharCard = {
   },
 
   hide() { this._el?.remove(); this._el = null; },
+
+  // NPC veya DB'de olmayan karakter için minimal popup
+  _npcPopup(name, x, y) {
+    this.hide();
+    const card = document.createElement('div');
+    card.style.cssText = `position:fixed;z-index:9998;background:var(--bg3);border:1px solid var(--ln2);border-radius:12px;box-shadow:0 12px 40px #0009;width:260px;font-family:var(--sans);font-size:12px`;
+    const cx = x != null ? Math.min(x+10, innerWidth-280) : innerWidth/2-130;
+    const cy = y != null ? Math.min(y+10, innerHeight-120) : innerHeight/2-50;
+    card.style.left = cx+'px'; card.style.top = cy+'px';
+    const ini = (name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    card.innerHTML = `<div style="background:rgba(124,77,255,.1);border-bottom:1px solid var(--ln2);padding:12px 14px;border-radius:12px 12px 0 0;display:flex;gap:10px;align-items:center">
+      <div style="width:40px;height:40px;border-radius:50%;background:rgba(124,77,255,.2);border:2px solid rgba(124,77,255,.4);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:var(--ac)">${ini}</div>
+      <div style="flex:1"><div style="font-weight:600;font-size:13px;color:var(--t0)">${name}</div><div style="font-size:10px;color:var(--t3);margin-top:2px">Spontane NPC</div></div>
+      <button onclick="CharCard.hide()" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:14px;padding:0">✕</button>
+    </div>
+    <div style="padding:12px 14px">
+      <p style="color:var(--t3);font-size:11px;margin:0 0 10px">Bu karakter veritabanında kayıtlı değil — MA tarafından spontane oluşturuldu.</p>
+      <button onclick="if(window.MasterAgent){MasterAgent.send('SAVE_NPC:{\"name\":\"${name.replace(/"/g,'\\"')}\"}');CharCard.hide();}" style="width:100%;padding:7px;background:rgba(124,77,255,.15);border:1px solid rgba(124,77,255,.4);color:var(--ac);border-radius:7px;cursor:pointer;font-size:11px;font-family:var(--sans)"><i class="fas fa-save" style="margin-right:5px"></i>DB'ye Kaydet (MA)</button>
+    </div>`;
+    document.body.appendChild(card);
+    this._el = card;
+    setTimeout(()=>document.addEventListener('click',e=>{if(!card.contains(e.target))this.hide();},{once:true}),100);
+  },
 
   _hdr(title, subtitle, avatar, color, closeAction) {
     const bg = color ? color + '22' : 'var(--bg3)';
