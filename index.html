@@ -3361,7 +3361,8 @@ const Autocomplete = {
   },
 
   _render(inp) {
-    this.hide();
+    // Sadece mevcut popup DOM'u kaldır, _items/_sel'i sıfırlama
+    this._el?.remove(); this._el = null; this.visible = false;
     if (!this._items.length) return;
     const rect = inp.getBoundingClientRect();
     const el = document.createElement('div');
