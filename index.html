@@ -679,6 +679,7 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
   <button class="adm-btn" id="obs-session-start" onclick="Adm.startSessionObs()" style="border-color:rgba(74,143,226,.4);color:var(--ac)" title="Sadece session başlangıç/bitişinde çalışır — billing dostu"><i class="fas fa-film"></i> Start Session</button>
   <button class="adm-btn danger"  id="obs-stop"  style="display:none" onclick="Adm.stopObs()"><i class="fas fa-stop"></i> Stop</button>
   <button class="adm-btn" id="obs-dbupdate" onclick="Adm.openDBUpdate()" style="border-color:rgba(77,184,128,.4);color:#4db880" title="Birden fazla session özetine bakarak karakterleri, ilişkileri ve durumları toplu güncelle"><i class="fas fa-sync-alt"></i> DB Güncelle</button>
+  <button class="adm-btn" onclick="AutoBackup.runNow()" style="border-color:rgba(155,111,212,.4);color:var(--pu)" title="Tüm odaları ve mesajları hemen yedekle"><i class="fas fa-database"></i> Backup Al</button>
   <button class="adm-btn" onclick="Adm.close()"><i class="fas fa-arrow-left"></i> RP'ye Dön</button>
 </div>
 <div id="tbar"></div>
@@ -1352,6 +1353,8 @@ const Login={
     a.innerHTML=`<span style="color:${u.color};font-family:var(--mono);font-size:13px;font-weight:700">${u.name[0]}</span><div class="online-dot"></div>`;
     document.getElementById('view-login').classList.remove('active');
     RP.init();
+    // 6 saatlik otomatik backup başlat
+    setTimeout(() => AutoBackup.start(), 3000);
   },
   _togglePw(inputId,btn){
     const inp=document.getElementById(inputId);if(!inp)return;
@@ -6119,6 +6122,92 @@ const MASidebar = {
 window.MASidebar = MASidebar;
 
 /* ═══ SESSION MANAGER ══════════════════════════════════════════ */
+/* ═══ AUTO BACKUP — her 6 saatte bir tüm odalar + mesajlar ═══════════════ */
+const AutoBackup = {
+  INTERVAL_MS: 6 * 60 * 60 * 1000, // 6 saat
+  _timer: null,
+  _lastRun: null,
+
+  start() {
+    if (this._timer) return;
+    // Sayfa açılınca son backup zamanını kontrol et
+    const lastTs = parseInt(localStorage.getItem('nyc_auto_backup_last') || '0');
+    const elapsed = Date.now() - lastTs;
+    // Eğer 6 saatten fazla geçmişse hemen çalıştır, değilse kalan süre sonra
+    const firstDelay = elapsed >= this.INTERVAL_MS ? 5000 : (this.INTERVAL_MS - elapsed);
+    setTimeout(async () => {
+      await this.run();
+      this._timer = setInterval(() => this.run(), this.INTERVAL_MS);
+    }, firstDelay);
+    console.log(`[AutoBackup] Başlatıldı — ilk backup ${Math.round(firstDelay/60000)} dk sonra`);
+  },
+
+  stop() {
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+  },
+
+  async run() {
+    if (!S.rooms?.length) { console.log('[AutoBackup] Oda yok, atlandı'); return; }
+    const ts = new Date().toISOString();
+    console.log('[AutoBackup] Başlıyor…', ts);
+    try {
+      const backupData = { ts, rooms: [], messages: {}, triggered_by: 'auto_6h' };
+
+      // Tüm odaları al
+      for (const room of S.rooms) {
+        backupData.rooms.push({ id: room.id, name: room.name, slug: room.slug, type: room.type, is_archived: room.is_archived });
+        // Her odanın son 500 mesajını al
+        try {
+          const msgs = await DB.get(`rp_messages?room_id=eq.${room.id}&is_deleted=eq.false&order=created_at.desc&limit=500`).catch(() => []);
+          if (msgs.length) backupData.messages[room.id] = msgs;
+        } catch(e) { console.warn(`[AutoBackup] Oda ${room.id} mesajları alınamadı`, e); }
+      }
+
+      const totalMsgs = Object.values(backupData.messages).reduce((a, b) => a + b.length, 0);
+
+      // Firebase'e kaydet
+      try {
+        await DB.post('rp_session_backups', {
+          backup_type: 'auto_6h',
+          room_count: backupData.rooms.length,
+          message_count: totalMsgs,
+          content: JSON.stringify(backupData),
+          created_at: ts,
+          triggered_by: S.user?.id || 'system'
+        });
+        console.log(`[AutoBackup] Firebase'e kaydedildi — ${backupData.rooms.length} oda, ${totalMsgs} mesaj`);
+      } catch(e) {
+        // Firebase yoksa localStorage'a düş
+        console.warn('[AutoBackup] Firebase yazılamadı, localStorage\'a kaydediliyor', e);
+        const lsKey = `nyc_auto_backup_${Date.now()}`;
+        try {
+          localStorage.setItem(lsKey, JSON.stringify(backupData));
+          // Sadece son 3 auto-backup'ı tut (localStorage sınırı için)
+          const autoKeys = Object.keys(localStorage).filter(k => k.startsWith('nyc_auto_backup_')).sort();
+          while (autoKeys.length > 3) localStorage.removeItem(autoKeys.shift());
+        } catch(_) { console.error('[AutoBackup] localStorage da doldu!'); }
+      }
+
+      localStorage.setItem('nyc_auto_backup_last', String(Date.now()));
+      this._lastRun = new Date();
+      toast(`💾 Otomatik backup — ${backupData.rooms.length} oda, ${totalMsgs} mesaj`, 'info');
+    } catch(e) { console.error('[AutoBackup] Genel hata:', e); }
+  },
+
+  // Manuel tetik (admin paneli için)
+  async runNow() {
+    toast('⏳ Manuel backup başlatılıyor…', 'info');
+    await this.run();
+  },
+
+  status() {
+    const last = parseInt(localStorage.getItem('nyc_auto_backup_last') || '0');
+    if (!last) return 'Henüz çalışmadı';
+    const mins = Math.round((Date.now() - last) / 60000);
+    return `Son backup: ${mins} dk önce`;
+  }
+};
+
 const Session = {
   _active: false,
   _startMsgId: null,
