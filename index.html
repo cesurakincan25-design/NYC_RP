@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3639,24 +3638,47 @@ const MasterAgent = {
     const dmCtx = (typeof window.DMEngine !== 'undefined' && DMEngine.getContext)
       ? DMEngine.getContext().toString().slice(0, 2000)
       : '(DM Engine bağlı değil)';
+    const activeChar = S.activeChar ? `${S.activeChar.name} (ID: ${S.activeChar.id})` : '(seçilmedi)';
+    const activeRoom = S.roomId || '(oda yok)';
 
     return [
-      '=== NYC_RP MASTER AGENT ===',
+      '=== NYC_RP MASTER AGENT — SİSTEM PROMPTU ===',
       `Gerçek zaman: ${now}`,
-      `RP zaman: ${rpTime}`,
+      `RP zamanı: ${rpTime}`,
+      `Aktif oda: ${activeRoom}`,
+      `Aktif karakter: ${activeChar}`,
       '',
-      'Sen NYC_DB roleplay sunucusunun ana yapay zeka asistanısın.',
-      'Rolün: Observer AI, DM Engine ve Chat paneli arasında köprü kurmak.',
-      'Kısa, işlevsel cevaplar ver. Türkçe konuş.',
+      'Sen NYC_DB roleplay sunucusunun ana yapay zeka yöneticisisin (Master Agent).',
+      'GÖREVLER:',
+      '1. Oyun yöneticisine (GM/admin) Türkçe olarak yardım et.',
+      '2. Observer AI, DM Engine ve RP Chat arasında köprü kur.',
+      '3. İstendiğinde RP odasına karakter adına mesaj at.',
+      '4. Rol, dispatch, olay metinlerini MUTLAKA TÜRKÇE yaz.',
+      '5. Kısa ve işlevsel cevap ver — sadece gerekli bilgiyi söyle.',
       '',
-      '== ERİŞEBİLECEĞİN FONKSİYONLAR ==',
-      '• OAI.Batcher.flush()      → Observer AI batch\'i hemen işle',
-      '• RpTime.get(roomId)       → Mevcut RP zamanını al',
-      '• RpTime.set(roomId, {…})  → RP zamanını değiştir',
-      '• DMEngine.readNow()       → DM bağlamını şimdi güncelle',
-      '• DMEngine.generateEvent() → Dünya olayı üret',
-      '• DMEngine.generateDispatch(npcId) → Dispatch üret',
-      '• DMEngine.npcList()       → NPC listesi',
+      'DİL KURALI: Tüm cevapların, ürettiğin rollerin, dispatch metinlerinin,',
+      'olay açıklamalarının ve NPC diyaloglarının tamamı TÜRKÇE olacak.',
+      'Hiçbir zaman İngilizce metin üretme. İsim/yer/unvan gibi lore ögeleri',
+      'orijinal kalabilir (örn: LSPD, Vinewood) ama cümleler Türkçe olacak.',
+      '',
+      '== KULLANABİLECEĞİN KOMUTLAR ==',
+      'Yanıtına aşağıdaki komutları göm, sistem otomatik çalıştırır:',
+      '',
+      'FLUSH_OAI          → Observer AI birikmiş mesajları hemen işle',
+      'READ_DM            → DM bağlamını şimdi güncelle',
+      'GEN_EVENT          → Dünya olayı üretme modalını aç',
+      'GEN_DISPATCH:NPC_ID → Belirtilen NPC için dispatch modalını aç',
+      '',
+      'SEND_MSG:{"content":"Mesaj metni","char_id":"KAR_ID","char_name":"Karakter Adı","room_id":"ODA_ID"}',
+      '  → RP odasına belirtilen karakter adına mesaj atar.',
+      '  → char_id ve char_name için mevcut karakterleri kullan (aşağıda liste var).',
+      '  → room_id belirtilmezse aktif oda kullanılır.',
+      '  → ÖRNEK: SEND_MSG:{"content":"*Telsizi eline alır* Bütün birimler dikkat! 10-4.","char_name":"Marcus Webb","char_id":"chr_12","room_id":"room_abc"}',
+      '',
+      '== AKTİF KARİŞTERLER (odaya mesaj atmak için kullan) ==',
+      (S.chars||[]).filter(c=>c.status!=='Deceased').slice(0,30).map(c=>
+        `  ${c.id} | ${c.name}${c.alias?' ('+c.alias+')':''}`
+      ).join('\n') || '  (karakter listesi yüklenmedi)',
       '',
       '== DÜNYA DURUMU ==',
       worldSnap,
@@ -3673,28 +3695,85 @@ const MasterAgent = {
     return `[CANLI BAĞLAM | RP: ${rpTime} | OAI: ${oaiStats} | Oda: ${S.roomId || '—'}]`;
   },
 
-  /* ── Execute a tool call if model asks for it ────────── */
+  /* ── Execute tool commands embedded in model reply ─────── */
   async _maybeTool(text) {
-    // Model can embed simple commands in its response wrapped in backtick blocks
-    // We just parse known action keywords and execute them silently
+    const results = [];
+
     if (/FLUSH_OAI/.test(text) && OAI?.Batcher?.flush) {
-      await OAI.Batcher.flush();
-      return '✅ Observer AI batch işlendi.';
+      try { await OAI.Batcher.flush(); results.push('✅ Observer AI batch işlendi.'); }
+      catch(e) { results.push('⚠️ OAI flush hatası: ' + e.message); }
     }
+
     if (/READ_DM/.test(text) && DMEngine?.readNow) {
-      await DMEngine.readNow();
-      return '✅ DM bağlamı güncellendi.';
+      try { await DMEngine.readNow(); results.push('✅ DM bağlamı güncellendi.'); }
+      catch(e) { results.push('⚠️ DM okuma hatası: ' + e.message); }
     }
+
     if (/GEN_EVENT/.test(text) && DMPanel?.openGenerateEvent) {
       DMPanel.openGenerateEvent();
-      return '✅ Dünya olayı üretme modalı açıldı.';
+      results.push('✅ Dünya olayı modalı açıldı.');
     }
-    if (/GEN_DISPATCH:(\w+)/.test(text) && DMPanel?.openGenerateDispatch) {
-      const npcId = text.match(/GEN_DISPATCH:(\w+)/)?.[1];
-      if (npcId) DMPanel.openGenerateDispatch(npcId);
-      return '✅ Dispatch üretme modalı açıldı.';
+
+    const dispatchMatch = text.match(/GEN_DISPATCH:([\w-]+)/);
+    if (dispatchMatch && DMPanel?.openGenerateDispatch) {
+      DMPanel.openGenerateDispatch(dispatchMatch[1]);
+      results.push('✅ Dispatch modalı açıldı.');
     }
-    return null;
+
+    // SEND_MSG:{ JSON } — send a message to the RP room
+    const sendMsgMatch = text.match(/SEND_MSG:(\{[\s\S]*?\})/);
+    if (sendMsgMatch) {
+      try {
+        const params = JSON.parse(sendMsgMatch[1]);
+        const roomId = params.room_id || S.roomId;
+        if (!roomId) throw new Error('Aktif oda yok');
+        if (!params.content?.trim()) throw new Error('İçerik boş');
+
+        // Resolve char info — try to find existing char or use provided fields
+        let charId   = params.char_id   || null;
+        let charName = params.char_name || 'Master Agent';
+        let charAlias = '';
+        let charAvatar = '';
+        let orgId = null, orgName = null, orgColor = null;
+
+        if (charId) {
+          const found = (S.chars || []).find(c => String(c.id) === String(charId));
+          if (found) {
+            charName   = found.name;
+            charAlias  = found.alias || '';
+            charAvatar = found.image || '';
+            const org  = S.oi?.get((found.organizations||[])[0] || found.organization);
+            if (org) { orgId = org.id; orgName = org.name; orgColor = org.color || null; }
+          }
+        }
+
+        const rpTime = await RpTime.onMessage(roomId, params.content);
+
+        const pl = {
+          room_id:     roomId,
+          char_id:     charId,
+          char_name:   charName,
+          char_alias:  charAlias,
+          char_avatar: charAvatar,
+          org_id:      orgId,
+          org_name:    orgName,
+          org_color:   orgColor,
+          content:     params.content,
+          attachment_url: null,
+          reactions:   {},
+          is_edited:   false,
+          sent_by_user: S.user?.id || null,
+          rp_time:     rpTime || null,
+        };
+
+        await DB.post('rp_messages', pl);
+        results.push(`✅ Mesaj gönderildi → [${charName}] "${params.content.slice(0, 60)}${params.content.length > 60 ? '…' : ''}"`);
+      } catch(e) {
+        results.push('❌ Mesaj gönderilemedi: ' + e.message);
+      }
+    }
+
+    return results.length ? results.join('\n') : null;
   },
 
   /* ── Send a message ──────────────────────────────────── */
@@ -3703,8 +3782,8 @@ const MasterAgent = {
     if (!userText.trim()) return;
     this._busy = true;
 
-    // Build system once
-    if (!this._SYSTEM) this._SYSTEM = this._buildSystem();
+    // Rebuild system prompt each time (active char/room may have changed)
+    this._SYSTEM = this._buildSystem();
 
     // Push user message
     const fullUserText = this._liveCtx() + '\n\n' + userText;
@@ -3740,11 +3819,11 @@ const MasterAgent = {
       const data = await res.json();
       const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || '(boş yanıt)';
 
-      // Check for tool commands in reply
+      // Execute embedded tool commands and collect results
       const toolResult = await this._maybeTool(reply);
-      const finalReply = toolResult ? reply + '\n\n' + toolResult : reply;
-
-      this._history.push({ role: 'model', parts: [{ text: reply }] });
+      // Store raw reply in history (for multi-turn context), show augmented in UI
+      const displayReply = toolResult ? reply + '\n\n---\n' + toolResult : reply;
+      this._history.push({ role: 'model', parts: [{ text: displayReply }] });
       this._renderHistory();
     } catch (e) {
       const errMsg = '❌ Hata: ' + e.message;
