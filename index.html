@@ -8,6 +8,51 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+  import * as firestore from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+  import { getAI, getGenerativeModel, GoogleAIBackend } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-ai.js';
+  window._fbSDK = { initializeApp };
+  window._fbFirestore = firestore;
+  window._fbFirestoreReady = true;
+  // NYC Firebase config
+  const _fbApp = initializeApp({
+    apiKey:            "AIzaSyCk5-f6fPp8GX7Ce_z0M74y_ai1017t4Yc",
+    authDomain:        "roleplay-databases.firebaseapp.com",
+    projectId:         "roleplay-databases",
+    storageBucket:     "roleplay-databases.firebasestorage.app",
+    messagingSenderId: "265831449807",
+    appId:             "1:265831449807:web:d5eeb3f114e13dd5f8e3ba"
+  });
+  window._fbDb = firestore.getFirestore(_fbApp);
+  // Firebase AI Logic — Gemini doğrudan Firebase üzerinden
+  try {
+    const _fbAI = getAI(_fbApp, { backend: new GoogleAIBackend() });
+    window._fbGetModel = (modelName) => getGenerativeModel(_fbAI, { model: modelName });
+    window._fbAIReady = true;
+  } catch(e) {
+    console.warn('[Firebase AI] Init failed:', e.message);
+    window._fbAIReady = false;
+  }
+  // Helper: load main doc from Firestore
+  window._fbLoadDB = async function(collection) {
+    try {
+      const { doc, getDoc } = window._fbFirestore;
+      const ref = doc(window._fbDb, collection, 'main');
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const d = snap.data();
+        return d.data || null;
+      }
+      return null;
+    } catch(e) {
+      console.warn('[Firebase] Load failed:', e.message);
+      return null;
+    }
+  };
+  window.dispatchEvent(new Event('firebase-ready'));
+</script>
 <style>
 
 :root{
@@ -569,21 +614,290 @@ function toast(msg,t=''){
   setTimeout(()=>el.remove(),3200);
 }
 
-/* ═══ DB ════════════════════════════════════════════════ */
+/* ═══ FIREBASE MESSAGING HELPERS ════════════════════════ */
+// Waits for Firebase SDK to be ready, then returns {db, fs} for Firestore ops
+function _fbReady(){
+  return new Promise(res=>{
+    if(window._fbFirestoreReady&&window._fbDb){res({db:window._fbDb,fs:window._fbFirestore});return;}
+    window.addEventListener('firebase-ready',()=>res({db:window._fbDb,fs:window._fbFirestore}),{once:true});
+  });
+}
+
+// Helper: generate a Firestore-safe auto ID
+function _fbId(){
+  const c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let r='';for(let i=0;i<20;i++)r+=c[Math.floor(Math.random()*c.length)];
+  return r;
+}
+
+// Firestore timestamp → ISO string
+function _fbTs(t){
+  if(!t)return new Date().toISOString();
+  if(t.toDate)return t.toDate().toISOString();
+  if(typeof t==='string')return t;
+  return new Date(t).toISOString();
+}
+
+/* ═══ DB (Firebase Firestore adapter) ═══════════════════ */
+// Messaging collections:
+//   rp_rooms/{roomId}
+//   rp_rooms/{roomId}/messages/{msgId}
+//   rp_presence/{charId}
+//   dm_conversations/{convId}
+//   dm_conversations/{convId}/messages/{msgId}
+//   rp_player_profiles/{userId}
+//
+// Observer AI tables remain on Supabase (ai_summaries, incidents,
+//   character_memories, relationship_changes, ai_flags, ai_agent_logs,
+//   ai_observer_config) — accessed via _SUPA helper below.
+//
 const DB={
-  async _f(u,o={}){
+  // ── Supabase helper (Observer AI only) ──────────────
+  async _sf(u,o={}){
     const c=new AbortController(),t=setTimeout(()=>c.abort(),DB_TO);
     try{const r=await fetch(u,{...o,signal:c.signal});clearTimeout(t);return r;}
     catch(e){clearTimeout(t);if(e.name==='AbortError')throw new Error('DB timeout');throw e;}
   },
-  async get(p){const r=await this._f(`${SUPA_URL}/rest/v1/${p}`,{headers:SH});if(!r.ok)throw new Error(await r.text());return r.json();},
-  async post(t,b){const r=await this._f(`${SUPA_URL}/rest/v1/${t}`,{method:'POST',headers:SH,body:JSON.stringify(b)});if(!r.ok)throw new Error(await r.text());return r.json();},
-  async patch(t,q,b){const r=await this._f(`${SUPA_URL}/rest/v1/${t}?${q}`,{method:'PATCH',headers:SH,body:JSON.stringify(b)});if(!r.ok)throw new Error(await r.text());return r.json();},
-  async upsert(t,onConflict,b){
-    const h={...SH,'Prefer':'resolution=merge-duplicates,return=representation'};
-    const r=await this._f(`${SUPA_URL}/rest/v1/${t}?on_conflict=${onConflict}`,{method:'POST',headers:h,body:JSON.stringify(b)});
-    if(!r.ok)throw new Error(await r.text());
-    return r.json();
+  _supaGet(p){return this._sf(`${SUPA_URL}/rest/v1/${p}`,{headers:SH}).then(r=>{if(!r.ok)throw new Error('Supa '+r.status);return r.json();}).catch(()=>[]);},
+  _supaPost(t,b){return this._sf(`${SUPA_URL}/rest/v1/${t}`,{method:'POST',headers:SH,body:JSON.stringify(b)}).then(r=>{if(!r.ok)return[];return r.json();}).catch(()=>[]);},
+  _supaPatch(t,q,b){return this._sf(`${SUPA_URL}/rest/v1/${t}?${q}`,{method:'PATCH',headers:SH,body:JSON.stringify(b)}).then(r=>{if(!r.ok)return[];return r.json();}).catch(()=>[]);},
+
+  // ── Supabase tables still on Supabase ───────────────
+  _SUPA_TABLES:new Set([
+    'ai_summaries','incidents','character_memories','relationship_changes',
+    'ai_flags','ai_observer_config','ai_agent_logs',
+  ]),
+
+  // ── Router: pick correct backend ────────────────────
+  _isSupa(t){return this._SUPA_TABLES.has(t.split('?')[0].split('/')[0]);},
+
+  // ── Firestore helpers ────────────────────────────────
+  async _getFs(){return _fbReady();},
+
+  // Parse legacy PostgREST query string into filters
+  // e.g. "room_id=eq.xyz&is_deleted=eq.false&order=id.asc&limit=30"
+  _parseQ(qs){
+    const res={filters:{},order:null,orderDir:'asc',limit:null,gt:null,gte:null,gtField:null,gteField:null};
+    if(!qs)return res;
+    qs.split('&').forEach(part=>{
+      const [k,v]=part.split('=');
+      if(!k||!v)return;
+      const mEq=v.match(/^eq\.(.+)$/);
+      const mGt=v.match(/^gt\.(.+)$/);
+      const mGte=v.match(/^gte\.(.+)$/);
+      if(k==='order'){const[f,d]=v.split('.');res.order=f;res.orderDir=d||'asc';}
+      else if(k==='limit')res.limit=parseInt(v);
+      else if(k==='select'||k==='on_conflict'){}
+      else if(mEq){res.filters[k]=mEq[1]==='false'?false:mEq[1]==='true'?true:mEq[1];}
+      else if(mGt){res.gt=mGt[1];res.gtField=k;}
+      else if(mGte){res.gte=mGte[1];res.gteField=k;}
+    });
+    return res;
+  },
+
+  // ── get(path) ─────────────────────────────────────────
+  async get(path){
+    const [table,...rest]=path.split('?');
+    const qs=rest.join('?');
+    if(this._isSupa(table))return this._supaGet(path);
+
+    const {db,fs}=await this._getFs();
+    const {collection,query,where,orderBy,limit,getDocs,doc,getDoc}=fs;
+
+    // ── rp_rooms ─────────────────────────────────────
+    if(table==='rp_rooms'){
+      const q=this._parseQ(qs);
+      let ref=collection(db,'rp_rooms');
+      let constraints=[];
+      Object.entries(q.filters).forEach(([k,v])=>constraints.push(where(k,'==',v)));
+      if(q.order)constraints.push(orderBy(q.order,q.orderDir));
+      if(q.limit)constraints.push(limit(q.limit));
+      const snap=await getDocs(query(ref,...constraints));
+      return snap.docs.map(d=>({id:d.id,...d.data(),created_at:_fbTs(d.data().created_at)}));
+    }
+
+    // ── rp_messages ──────────────────────────────────
+    if(table==='rp_messages'){
+      const q=this._parseQ(qs);
+      const roomId=q.filters.room_id;
+      if(!roomId)return[];
+      delete q.filters.room_id;
+      let ref=collection(db,'rp_rooms',String(roomId),'messages');
+      let constraints=[];
+      Object.entries(q.filters).forEach(([k,v])=>constraints.push(where(k,'==',v)));
+      if(q.gtField)constraints.push(where(q.gtField,'>',q.gt));
+      if(q.gteField)constraints.push(where(q.gteField,'>=',q.gte));
+      if(q.order)constraints.push(orderBy(q.order,q.orderDir));
+      if(q.limit)constraints.push(limit(q.limit));
+      const snap=await getDocs(query(ref,...constraints));
+      return snap.docs.map(d=>({id:d.id,...d.data(),created_at:_fbTs(d.data().created_at)}));
+    }
+
+    // ── rp_presence ──────────────────────────────────
+    if(table==='rp_presence'){
+      const q=this._parseQ(qs);
+      let ref=collection(db,'rp_presence');
+      let constraints=[];
+      // Handle last_seen=gte.xxx
+      if(q.gteField==='last_seen'){
+        constraints.push(where('last_seen','>=',q.gte));
+      }
+      Object.entries(q.filters).forEach(([k,v])=>constraints.push(where(k,'==',v)));
+      if(q.order)constraints.push(orderBy(q.order,q.orderDir));
+      const snap=await getDocs(query(ref,...constraints));
+      return snap.docs.map(d=>({...d.data(),char_id:d.id}));
+    }
+
+    // ── dm_conversations ─────────────────────────────
+    if(table==='dm_conversations'){
+      const q=this._parseQ(qs);
+      let ref=collection(db,'dm_conversations');
+      let constraints=[];
+      Object.entries(q.filters).forEach(([k,v])=>constraints.push(where(k,'==',v)));
+      if(q.order)constraints.push(orderBy(q.order,q.orderDir));
+      if(q.limit)constraints.push(limit(q.limit));
+      const snap=await getDocs(query(ref,...constraints));
+      return snap.docs.map(d=>({id:d.id,...d.data()}));
+    }
+
+    // ── dm_messages ──────────────────────────────────
+    if(table==='dm_messages'){
+      const q=this._parseQ(qs);
+      const convId=q.filters.conversation_id;
+      if(!convId)return[];
+      delete q.filters.conversation_id;
+      let ref=collection(db,'dm_conversations',String(convId),'messages');
+      let constraints=[];
+      Object.entries(q.filters).forEach(([k,v])=>constraints.push(where(k,'==',v)));
+      if(q.gtField)constraints.push(where(q.gtField,'>',q.gt));
+      if(q.order)constraints.push(orderBy(q.order,q.orderDir));
+      if(q.limit)constraints.push(limit(q.limit));
+      const snap=await getDocs(query(ref,...constraints));
+      return snap.docs.map(d=>({id:d.id,...d.data(),created_at:_fbTs(d.data().created_at)}));
+    }
+
+    // ── rp_player_profiles ───────────────────────────
+    if(table==='rp_player_profiles'){
+      const q=this._parseQ(qs);
+      let ref=collection(db,'rp_player_profiles');
+      let constraints=[];
+      Object.entries(q.filters).forEach(([k,v])=>constraints.push(where(k,'==',v)));
+      const snap=await getDocs(query(ref,...constraints));
+      return snap.docs.map(d=>({...d.data(),id:d.id}));
+    }
+
+    console.warn('[DB.get] Unknown table:',table);return[];
+  },
+
+  // ── post(table, body) → [{id,...}] ──────────────────
+  async post(table,body){
+    if(this._isSupa(table))return this._supaPost(table,body);
+    const {db,fs}=await this._getFs();
+    const {collection,doc,setDoc,addDoc,serverTimestamp}=fs;
+    const now=new Date().toISOString();
+
+    if(table==='rp_rooms'){
+      const id=body.id||_fbId();
+      const data={...body,id,created_at:body.created_at||now,sort_order:body.sort_order||0};
+      await setDoc(doc(db,'rp_rooms',String(id)),data);
+      return[data];
+    }
+    if(table==='rp_messages'){
+      const roomId=body.room_id;if(!roomId)return[];
+      const id=_fbId();
+      const data={...body,id,created_at:now};
+      await setDoc(doc(db,'rp_rooms',String(roomId),'messages',id),data);
+      return[data];
+    }
+    if(table==='dm_conversations'){
+      const id=_fbId();
+      const data={...body,id,created_at:now};
+      await setDoc(doc(db,'dm_conversations',id),data);
+      return[data];
+    }
+    if(table==='dm_messages'){
+      const convId=body.conversation_id;if(!convId)return[];
+      const id=_fbId();
+      const data={...body,id,created_at:now};
+      await setDoc(doc(db,'dm_conversations',String(convId),'messages',id),data);
+      return[data];
+    }
+    if(table==='rp_player_profiles'){
+      const userId=body.user_id;if(!userId)return[];
+      await setDoc(doc(db,'rp_player_profiles',userId),{...body,updated_at:now},{merge:true});
+      return[{...body,id:userId}];
+    }
+    console.warn('[DB.post] Unknown table:',table);return[];
+  },
+
+  // ── patch(table, query, body) ────────────────────────
+  async patch(table,qs,body){
+    if(this._isSupa(table))return this._supaPatch(table,qs,body);
+    const {db,fs}=await this._getFs();
+    const {doc,updateDoc,getDocs,collection,query,where,writeBatch}=fs;
+
+    if(table==='rp_rooms'){
+      const q=this._parseQ(qs);const idVal=q.filters.id;
+      if(idVal){
+        await updateDoc(doc(db,'rp_rooms',String(idVal)),body).catch(()=>{});
+        return[{id:idVal,...body}];
+      }
+      return[];
+    }
+    if(table==='rp_messages'){
+      const q=this._parseQ(qs);const idVal=q.filters.id;
+      // We need room_id to path into subcollection — search all rooms
+      if(idVal){
+        // Try to find by scanning known rooms cache
+        let found=false;
+        for(const room of(window.S?.rooms||[])){
+          try{
+            const ref=doc(db,'rp_rooms',String(room.id),'messages',String(idVal));
+            await updateDoc(ref,body);
+            found=true;break;
+          }catch(e){}
+        }
+        if(!found){
+          // Fallback: just mark deleted in current room
+          if(window.S?.roomId){
+            await updateDoc(doc(db,'rp_rooms',String(window.S.roomId),'messages',String(idVal)),body).catch(()=>{});
+          }
+        }
+        return[{id:idVal,...body}];
+      }
+      return[];
+    }
+    if(table==='dm_conversations'){
+      const q=this._parseQ(qs);const idVal=q.filters.id;
+      if(idVal){
+        await updateDoc(doc(db,'dm_conversations',String(idVal)),body).catch(()=>{});
+        return[{id:idVal,...body}];
+      }
+      return[];
+    }
+    if(table==='rp_presence'){return[];}// presence uses upsert
+    console.warn('[DB.patch] Unknown table:',table);return[];
+  },
+
+  // ── upsert(table, conflictKey, body) ────────────────
+  async upsert(table,onConflict,body){
+    if(this._isSupa(table))return this._supaPost(table,body);
+    const {db,fs}=await this._getFs();
+    const {doc,setDoc}=fs;
+    const now=new Date().toISOString();
+
+    if(table==='rp_presence'){
+      const charId=body.char_id;if(!charId)return[];
+      await setDoc(doc(db,'rp_presence',String(charId)),{...body,last_seen:now},{merge:true});
+      return[{...body,last_seen:now}];
+    }
+    if(table==='rp_player_profiles'){
+      const userId=body.user_id;if(!userId)return[];
+      await setDoc(doc(db,'rp_player_profiles',userId),{...body,updated_at:now},{merge:true});
+      return[{...body}];
+    }
+    // Generic fallback
+    return this.post(table,body);
   }
 };
 
@@ -647,16 +961,17 @@ const RP={
   async init(){
     document.getElementById('loader').classList.remove('hidden');
     try{
-      const rows=await DB.get('nyc_db?id=eq.main&select=data');
-      if(rows.length){
-        const d=typeof rows[0].data==='string'?JSON.parse(rows[0].data):rows[0].data;
+      // Firebase'den NYC_DB çek
+      const d = await window._fbLoadDB('nyc_db');
+      if(d){
         S.chars=d.characters||[];S.orgs=d.organizations||[];
+        S._db=d;  // vehicles, properties, equipments için de sakla
         S.chars.forEach(c=>{S.ci.set(c.id,c);if(c.name)S.cni.set(c.name.toLowerCase(),c.id);if(c.alias)S.cni.set(c.alias.toLowerCase(),c.id);});
         S.orgs.forEach(o=>S.oi.set(o.id,o));
       }
-    }catch(e){console.warn('[RP] nyc_db:',e.message);}
+    }catch(e){console.warn('[RP] nyc_db firebase:',e.message);}
     try{
-      const rows=await DB.get('rp_rooms?order=sort_order.asc,created_at.asc');
+      const rows=await DB.get('rp_rooms?order=sort_order.asc');
       if(rows.length)S.rooms=rows;else RP._dfRooms();
     }catch(e){RP._dfRooms();S._off=true;}
     const sc=localStorage.getItem('rp_active_char');
@@ -1033,84 +1348,117 @@ const RP={
   _org(id){return id?S.oi.get(id)||null:null;}
 };
 
-/* ═══ REALTIME ═══════════════════════════════════════════ */
+/* ═══ REALTIME (Firebase onSnapshot) ════════════════════ */
 const RT={
-  lastId:null, ws:null, pt:null,
-  _wsAlive:false,   // WS actively receiving
-  _wsAliveTimer:null,
+  lastId:null,
+  _unsubMsg:null,     // onSnapshot unsubscribe for messages
+  _unsubPresence:null,// onSnapshot unsubscribe for presence
+  _unsubDM:null,      // onSnapshot unsubscribe for DM messages
+  _presenceTimer:null,
+  _seenIds:new Set(), // avoid duplicate handling on initial snapshot
 
-  connect(roomId){
+  async connect(roomId){
     this.disconnect();
-    // Polling fallback — only fires if WS is silent for >2s
-    this.pt=setInterval(()=>{
-      if(!this._wsAlive) this._poll(roomId);
-      this._wsAlive=false; // reset each cycle
-    },800);
-    this._connectWS(roomId);
-  },
-
-  _connectWS(roomId){
+    this._seenIds=new Set();
+    if(S._off)return;
     try{
-      const wsUrl=SUPA_URL.replace('https://','wss://')+'/realtime/v1/websocket?apikey='+SUPA_KEY+'&vsn=1.0.0';
-      const ws=new WebSocket(wsUrl);
-      this.ws=ws;
-      ws.onopen=()=>{
-        // Subscribe to all rp_messages events in this room (INSERT + UPDATE for deletes)
-        ws.send(JSON.stringify({topic:`realtime:public:rp_messages`,event:'phx_join',payload:{},ref:1}));
-        // Subscribe to presence
-        ws.send(JSON.stringify({topic:`realtime:public:rp_presence`,event:'phx_join',payload:{},ref:2}));
-        // Subscribe to PM messages
-        ws.send(JSON.stringify({topic:`realtime:public:dm_messages`,event:'phx_join',payload:{},ref:3}));
-        // Keep-alive ping every 25s
-        this._pingTimer=setInterval(()=>{try{ws.send(JSON.stringify({topic:'phoenix',event:'heartbeat',payload:{},ref:0}));}catch(e){}},25000);
-      };
-      ws.onmessage=e=>{
-        try{
-          const m=JSON.parse(e.data);
-          if(m.topic?.includes('rp_messages')){
-            if(m.event==='INSERT'){ this._wsAlive=true; this._handleMsg(m.payload.record); }
-            // Handle soft-delete propagation
-            if(m.event==='UPDATE'&&m.payload.record?.is_deleted){
-              this._wsAlive=true;
-              const id=m.payload.record.id;
-              // Remove from all room caches
-              Object.keys(S.msgs).forEach(rid=>{
-                S.msgs[rid]=S.msgs[rid].filter(msg=>msg.id!=id);
-              });
-              document.querySelector(`[data-msg-id="${id}"]`)?.remove();
+      const {db,fs}=await _fbReady();
+      const {collection,query,where,orderBy,limit,onSnapshot,doc}=fs;
+
+      // ── Messages listener ──────────────────────────────
+      // Listen for new messages in this room, ordered by created_at
+      // We load last 50 on connect, then track new ones
+      const msgsRef=collection(db,'rp_rooms',String(roomId),'messages');
+      const msgsQ=query(msgsRef,orderBy('created_at','asc'),limit(50));
+      let _first=true;
+      this._unsubMsg=onSnapshot(msgsQ,snap=>{
+        snap.docChanges().forEach(change=>{
+          const data={...change.doc.data(),id:change.doc.id,created_at:_fbTs(change.doc.data().created_at)};
+          if(change.type==='added'){
+            if(_first){
+              // Suppress notification for initial load — already rendered by switchRoom
+              if(S.msgs[S.roomId]?.find(m=>m.id===data.id))return;
+              this._seenIds.add(data.id);
+              this._handleMsg(data,/*notify=*/false);
+            }else{
+              if(this._seenIds.has(data.id))return;
+              this._seenIds.add(data.id);
+              this._handleMsg(data,/*notify=*/true);
             }
           }
-          if(m.event==='INSERT'&&m.topic?.includes('rp_presence')){
-            this._wsAlive=true;
-            this._handlePresence(m.payload.record);
+          if(change.type==='modified'){
+            if(data.is_deleted){
+              // Soft-delete: remove from all caches & DOM
+              Object.keys(S.msgs).forEach(rid=>{S.msgs[rid]=S.msgs[rid].filter(m=>m.id!=data.id);});
+              document.querySelector(`[data-msg-id="${data.id}"]`)?.remove();
+            }else{
+              // Edit: update in cache & DOM
+              if(S.msgs[roomId]){
+                const idx=S.msgs[roomId].findIndex(m=>m.id===data.id);
+                if(idx>=0)S.msgs[roomId][idx]={...S.msgs[roomId][idx],...data};
+              }
+              const el=document.querySelector(`[data-msg-id="${data.id}"] .msg-txt`);
+              if(el){el.innerHTML=UI._rc(data.content||'');}
+              const editedBadge=document.querySelector(`[data-msg-id="${data.id}"] .msg-edited`);
+              if(!editedBadge&&data.is_edited){
+                const badge=document.createElement('span');badge.className='msg-edited';badge.textContent='(düzenlendi)';
+                document.querySelector(`[data-msg-id="${data.id}"] .msg-time`)?.before(badge);
+              }
+              // Reactions update
+              if(data.reactions){
+                const rEl=document.querySelector(`[data-msg-id="${data.id}"] .msg-reactions`);
+                if(rEl){rEl.innerHTML='';Object.entries(data.reactions).forEach(([emoji,users])=>{if(!users?.length)return;const p=document.createElement('button');p.className='react-chip';p.dataset.count=users.length;p.innerHTML=`${emoji}<span class="rc">${users.length}</span>`;p.onclick=()=>RP.react(data.id,emoji);rEl.appendChild(p);});}
+              }
+            }
           }
-          // PM new message via WS
-          if(m.event==='INSERT'&&m.topic?.includes('dm_messages')){
-            this._wsAlive=true;
-            this._handlePM(m.payload.record);
-          }
-        }catch(ex){}
-      };
-      ws.onclose=()=>{ clearInterval(this._pingTimer); this._wsAlive=false; };
-      ws.onerror=()=>{ this._wsAlive=false; };
-    }catch(e){ this._wsAlive=false; }
+        });
+        _first=false;
+      },err=>console.warn('[RT] messages onSnapshot error:',err));
+
+      // ── Presence listener ──────────────────────────────
+      const presRef=collection(db,'rp_presence');
+      const cut60=new Date(Date.now()-60000).toISOString();
+      const presQ=query(presRef,where('last_seen','>=',cut60));
+      this._unsubPresence=onSnapshot(presQ,snap=>{
+        snap.docChanges().forEach(change=>{
+          const rec={...change.doc.data(),char_id:change.doc.id};
+          if(change.type==='added'||change.type==='modified') this._handlePresence(rec);
+          if(change.type==='removed') {delete S.presence[rec.char_id];delete S.typing[rec.char_id];}
+        });
+        UI.renderMembers();UI.renderTyping();
+      },()=>{});
+
+    }catch(e){console.warn('[RT] connect error:',e);}
+
+    // Presence polling as fallback every 5s (catches stale docs)
+    this._presenceTimer=setInterval(()=>this._presence(),5000);
   },
 
   disconnect(){
-    clearInterval(this.pt);
-    clearInterval(this._pingTimer);
-    if(this.ws){try{this.ws.close();}catch(e){} this.ws=null;}
-    this._wsAlive=false;
+    if(this._unsubMsg){try{this._unsubMsg();}catch(e){} this._unsubMsg=null;}
+    if(this._unsubPresence){try{this._unsubPresence();}catch(e){} this._unsubPresence=null;}
+    if(this._unsubDM){try{this._unsubDM();}catch(e){} this._unsubDM=null;}
+    clearInterval(this._presenceTimer);this._presenceTimer=null;
   },
 
-  async _poll(roomId){
-    if(!roomId||S._off)return;
+  // Called from PM.open() to watch DM messages in realtime
+  async watchDM(convId){
+    if(this._unsubDM){try{this._unsubDM();}catch(e){} this._unsubDM=null;}
     try{
-      const qs=this.lastId
-        ?`rp_messages?room_id=eq.${roomId}&id=gt.${this.lastId}&is_deleted=eq.false&order=id.asc&limit=30`
-        :`rp_messages?room_id=eq.${roomId}&is_deleted=eq.false&order=id.asc&limit=30&select=id,room_id,char_id,char_name,char_alias,char_avatar,org_id,org_name,org_color,content,attachment_url,reactions,is_edited,reply_to_id,reply_to_sender,reply_to_content,sent_by_user,created_at`;
-      const rows=await DB.get(qs);
-      rows.forEach(r=>this._handleMsg(r));
+      const {db,fs}=await _fbReady();
+      const {collection,query,orderBy,limit,onSnapshot}=fs;
+      const ref=collection(db,'dm_conversations',String(convId),'messages');
+      const q=query(ref,orderBy('created_at','asc'),limit(100));
+      let first=true;
+      this._unsubDM=onSnapshot(q,snap=>{
+        if(first){first=false;return;} // initial load already done by PM._loadMessages
+        snap.docChanges().forEach(change=>{
+          if(change.type==='added'){
+            const data={...change.doc.data(),id:change.doc.id,created_at:_fbTs(change.doc.data().created_at)};
+            this._handlePM(data);
+          }
+        });
+      },()=>{});
     }catch(e){}
   },
 
@@ -1138,7 +1486,7 @@ const RT={
   },
 
   _handlePresence(rec){
-    // Live presence update via WS — immediately refresh typing/members
+    // Live presence update via onSnapshot — immediately refresh typing/members
     if(rec.is_typing!==undefined){
       S.presence[rec.char_id]=rec;
       if(rec.is_typing&&rec.room_id==S.roomId&&rec.char_id!==S.activeChar?.id){
@@ -1156,7 +1504,7 @@ const RT={
     }
   },
 
-  _handleMsg(rec){
+  _handleMsg(rec,notify=true){
     if(!S.msgs[S.roomId])S.msgs[S.roomId]=[];
     if(S.msgs[S.roomId].find(m=>m.id===rec.id))return;
     if(rec.room_id!=S.roomId)return;
@@ -1167,7 +1515,7 @@ const RT={
     if(rec.char_id){ delete S.typing[rec.char_id]; UI.renderTyping(); }
     OAI.Batcher.ingest([rec]);
     // Notify if from someone else
-    if(rec.sent_by_user&&rec.sent_by_user!==S.user?.id){
+    if(notify&&rec.sent_by_user&&rec.sent_by_user!==S.user?.id){
       const room=S.rooms.find(r=>r.id==S.roomId);
       const sender=USERS?.find(u=>u.id===rec.sent_by_user);
       Notif.show({
@@ -1733,9 +2081,14 @@ const OAI={
       const orgs=S.orgs.map(o=>`• ${o.name} [${o.id}]`).join('\n');
       const tr=messages.map(m=>{const t=new Date(m.created_at).toISOString().slice(11,16);return `[${t}] ${m.char_name}${m.char_alias?` "${m.char_alias}"`:''}${m.org_name?` [${m.org_name}]`:''}: ${m.content}`;}).join('\n');
       const prompt=`You are NYC_DB Observer AI. Observe only. Return ONLY valid JSON.\nROSTER:\nCHARACTERS:\n${chars}\nORGANIZATIONS:\n${orgs}\nTRANSCRIPT:\n${tr}\nRespond:{"session_summary":{"title":"","summary":"","involved_chars":[],"involved_orgs":[],"significance":"low"},"incidents":[{"title":"","incident_type":"confrontation","severity":"low","description":"","location_name":"","involved_chars":[],"involved_orgs":[],"source_confidence":0.0}],"character_memories":[{"char_id":"","char_name":"","memory_type":"event","title":"","content":"","emotional_tag":"neutral","importance":50,"about_chars":[]}],"relationship_changes":[{"entity_a_id":"","entity_a_name":"","entity_a_type":"character","entity_b_id":"","entity_b_name":"","entity_b_type":"character","change_type":"neutral","direction":"mutual","trust_delta":0,"description":""}],"flags":{"requires_admin_review":false,"review_reason":""}}`;
-      const r=await fetch(`${SUPA_URL}/functions/v1/gemini-proxy`,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY},body:JSON.stringify({model:GEM_MDL,contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{temperature:0.2,topP:0.8,maxOutputTokens:2048,responseMimeType:'application/json'},safetySettings:[{category:'HARM_CATEGORY_HARASSMENT',threshold:'BLOCK_NONE'},{category:'HARM_CATEGORY_HATE_SPEECH',threshold:'BLOCK_NONE'},{category:'HARM_CATEGORY_SEXUALLY_EXPLICIT',threshold:'BLOCK_NONE'},{category:'HARM_CATEGORY_DANGEROUS_CONTENT',threshold:'BLOCK_NONE'}]})});
-      if(!r.ok)throw new Error('Gemini '+r.status);
-      const d=await r.json();const raw=d?.candidates?.[0]?.content?.parts?.[0]?.text;if(!raw)throw new Error('Gemini empty');
+      if(!window._fbAIReady||!window._fbGetModel)throw new Error('Firebase AI hazır değil');
+      const _model=window._fbGetModel(GEM_MDL);
+      const _result=await _model.generateContent({
+        contents:[{role:'user',parts:[{text:prompt}]}],
+        generationConfig:{temperature:0.2,topP:0.8,maxOutputTokens:2048},
+        safetySettings:[{category:'HARM_CATEGORY_HARASSMENT',threshold:'BLOCK_NONE'},{category:'HARM_CATEGORY_HATE_SPEECH',threshold:'BLOCK_NONE'},{category:'HARM_CATEGORY_SEXUALLY_EXPLICIT',threshold:'BLOCK_NONE'},{category:'HARM_CATEGORY_DANGEROUS_CONTENT',threshold:'BLOCK_NONE'}],
+      });
+      const raw=_result?.response?.candidates?.[0]?.content?.parts?.[0]?.text;if(!raw)throw new Error('Gemini empty');
       const parsed=JSON.parse(raw.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```$/i,'').trim());
       if(!this.CFG.DRY_RUN){
         let sumId=null;
@@ -2079,6 +2432,8 @@ const PM={
 
     this._convId=convId;this._userId=targetUserId;
     this._openWindow(target||{id:targetUserId,name:targetUserId,color:'var(--ac)'},convId);
+    // Start Firebase realtime listener for this DM conversation
+    RT.watchDM(convId);
   },
 
   _openWindow(target,convId){
@@ -2188,6 +2543,7 @@ const PM={
 
   close(){
     clearInterval(this._pollTimer);
+    if(RT._unsubDM){try{RT._unsubDM();}catch(e){}RT._unsubDM=null;}
     const win=document.getElementById('pm-window');
     if(win)win.style.display='none';
     this._convId=null;this._userId=null;this._lastId=null;
