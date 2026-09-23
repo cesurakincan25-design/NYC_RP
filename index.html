@@ -152,7 +152,14 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 .msg-char{font-size:13px;font-weight:600;color:var(--t0);cursor:pointer}
 .msg-char:hover{text-decoration:underline}
 .msg-org{font-family:var(--mono);font-size:9px;font-weight:600;padding:1px 5px;border-radius:2px;letter-spacing:.06em;text-transform:uppercase}
-.msg-ts{font-family:var(--mono);font-size:10px;color:var(--t3);margin-left:auto}
+.msg-ts{font-family:var(--mono);font-size:10px;color:var(--t3);margin-left:auto;display:flex;align-items:center;gap:6px}
+.msg-rp-ts{font-family:var(--mono);font-size:10px;color:var(--pu);opacity:.75;padding:1px 5px;border-radius:3px;background:var(--pu);background:rgba(155,111,212,.1);border:1px solid rgba(155,111,212,.2)}
+.msg-rp-tz{opacity:.6;font-size:9px}
+/* RP Time header pill */
+.rp-time-pill{font-family:var(--mono);font-size:10px;color:var(--pu);padding:3px 8px;border-radius:12px;background:rgba(155,111,212,.1);border:1px solid rgba(155,111,212,.25);cursor:pointer;transition:background var(--tr);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.rp-time-pill:hover{background:rgba(155,111,212,.2)}
+.rp-time-pill.rpt-manual{color:var(--am);background:var(--am-d);border-color:rgba(232,167,74,.35)}
+.rp-time-pill.rpt-paused{color:var(--rd);background:var(--rd-d);border-color:rgba(224,85,85,.35)}
 .msg-edited{font-family:var(--mono);font-size:9px;color:var(--t3);margin-left:3px}
 .msg-text{font-size:13.5px;color:var(--t1);line-height:1.6;word-break:break-word;white-space:pre-wrap}
 .emote{color:#c084fc;font-style:italic}
@@ -188,6 +195,10 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 .msg-edit-wrap{display:none;margin-top:4px}
 .msg-editing .msg-edit-wrap{display:block}
 .edt-ta{width:100%;background:var(--bg3);border:1px solid var(--ac);border-radius:var(--r);color:var(--t0);font-family:var(--sans);font-size:13.5px;padding:7px 10px;outline:none;resize:none;line-height:1.5;min-height:36px}
+.edt-rpt{display:flex;align-items:center;gap:6px;margin-top:5px;padding:4px 8px;background:rgba(155,111,212,.08);border:1px solid rgba(155,111,212,.2);border-radius:var(--r)}
+.edt-rpt label{font-family:var(--mono);font-size:9px;color:var(--pu);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;opacity:.8}
+.edt-rpt input{background:transparent;border:none;color:var(--pu);font-family:var(--mono);font-size:11px;outline:none;flex:1;min-width:0}
+.edt-rpt input::placeholder{color:rgba(155,111,212,.4)}
 .edt-btns{display:flex;gap:6px;margin-top:5px}
 .edt-save{padding:4px 12px;background:var(--ac);color:#fff;border:none;border-radius:var(--r);font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer}
 .edt-cancel{padding:4px 12px;background:var(--bg4);color:var(--t1);border:none;border-radius:var(--r);font-family:var(--mono);font-size:10px;font-weight:600;cursor:pointer}
@@ -450,6 +461,7 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
     <span class="ch-name" id="room-title">live</span>
     <span class="ch-desc" id="room-desc">All RP messages</span>
     <span class="hdr-spc"></span>
+    <button class="rp-time-pill" id="rp-time-pill" onclick="RpTime.openModal(S.roomId)" title="RP Zaman Yöneticisi"><i class="fas fa-clock" style="font-size:9px"></i><span id="rp-time-display">— : —</span></button>
     <button class="hdr-btn" id="btn-mem"><i class="fas fa-users"></i></button>
   </div>
   <div id="messages-list"><div class="empty" id="empty-state"><i class="fas fa-comment-slash"></i><p>Sahne boş — başlat</p></div></div>
@@ -460,9 +472,16 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
     <div id="input-box">
       <div id="char-tags-bar"></div>
       <textarea id="msg-input" placeholder="Mesaj yaz…  [emote]  Chip'e tıkla → İsim ekler" rows="1"></textarea>
+      <div id="rp-time-override-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px 0;border-top:1px solid rgba(155,111,212,.15)">
+        <i class="fas fa-clock" style="font-size:10px;color:var(--pu);opacity:.7"></i>
+        <span style="font-family:var(--mono);font-size:9px;color:var(--pu);opacity:.7;text-transform:uppercase;letter-spacing:.08em">RP Zamanı Override</span>
+        <input id="rp-time-override-inp" type="text" placeholder="YYYY-MM-DD HH:MM TZ  (boş = otomatik)" style="flex:1;background:transparent;border:none;outline:none;color:var(--pu);font-family:var(--mono);font-size:11px">
+        <button onclick="document.getElementById('rp-time-override-bar').style.display='none';document.getElementById('rp-time-override-inp').value=''" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:11px;padding:0 2px">✕</button>
+      </div>
       <div id="input-toolbar">
         <button class="tb-btn" onclick="RP.toggleEmoji(event)"><i class="far fa-smile"></i></button>
         <button class="tb-btn" onclick="RP.promptAttach()"><i class="fas fa-image"></i></button>
+        <button class="tb-btn" id="btn-rpt-override" title="RP Zamanı override" onclick="const b=document.getElementById('rp-time-override-bar');const shown=b.style.display==='flex';b.style.display=shown?'none':'flex';if(!shown){const st=RpTime._state[S.roomId];if(st)document.getElementById('rp-time-override-inp').placeholder=RpTime.fmt(st)+' (boş = otomatik)';document.getElementById('rp-time-override-inp').focus();}"><i class="fas fa-clock" style="color:var(--pu);opacity:.7"></i></button>
         <span class="tb-spc"></span>
         <button id="send-btn" onclick="RP.send()"><i class="fas fa-paper-plane"></i> SEND</button>
       </div>
@@ -532,6 +551,46 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 </div><!-- /view-admin -->
 
 <!-- MODALS -->
+<!-- RP Time Manager Modal -->
+<div class="mbd hidden" id="m-rp-time">
+<div class="mbox" style="max-width:400px">
+  <div class="mhd"><span class="mti"><i class="fas fa-clock" style="color:var(--pu);margin-right:8px"></i>RP Zaman Yöneticisi</span><button class="mcl" onclick="CM('m-rp-time')"><i class="fas fa-times"></i></button></div>
+  <div class="mbdy">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+      <div><label style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.08em;text-transform:uppercase;display:block;margin-bottom:4px">YIL</label><input type="number" id="rtm-year" min="2000" max="2100" style="width:100%;background:var(--bg1);border:1px solid var(--ln);border-radius:var(--r);color:var(--t0);font-family:var(--mono);font-size:13px;padding:6px 8px;outline:none"></div>
+      <div><label style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.08em;text-transform:uppercase;display:block;margin-bottom:4px">AY</label><input type="number" id="rtm-month" min="1" max="12" style="width:100%;background:var(--bg1);border:1px solid var(--ln);border-radius:var(--r);color:var(--t0);font-family:var(--mono);font-size:13px;padding:6px 8px;outline:none"></div>
+      <div><label style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.08em;text-transform:uppercase;display:block;margin-bottom:4px">GÜN</label><input type="number" id="rtm-day" min="1" max="31" style="width:100%;background:var(--bg1);border:1px solid var(--ln);border-radius:var(--r);color:var(--t0);font-family:var(--mono);font-size:13px;padding:6px 8px;outline:none"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+      <div><label style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.08em;text-transform:uppercase;display:block;margin-bottom:4px">SAAT</label><input type="number" id="rtm-hour" min="0" max="23" style="width:100%;background:var(--bg1);border:1px solid var(--ln);border-radius:var(--r);color:var(--t0);font-family:var(--mono);font-size:13px;padding:6px 8px;outline:none"></div>
+      <div><label style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.08em;text-transform:uppercase;display:block;margin-bottom:4px">DAKİKA</label><input type="number" id="rtm-minute" min="0" max="59" style="width:100%;background:var(--bg1);border:1px solid var(--ln);border-radius:var(--r);color:var(--t0);font-family:var(--mono);font-size:13px;padding:6px 8px;outline:none"></div>
+      <div><label style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.08em;text-transform:uppercase;display:block;margin-bottom:4px">TIMEZONE</label><select id="rtm-tz" style="width:100%;background:var(--bg1);border:1px solid var(--ln);border-radius:var(--r);color:var(--t0);font-family:var(--mono);font-size:13px;padding:6px 8px;outline:none"><option>EST</option><option>CST</option><option>PST</option><option>GMT</option><option>CET</option></select></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+      <div><label style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.08em;text-transform:uppercase;display:block;margin-bottom:4px">MOD</label>
+        <select id="rtm-mode" style="width:100%;background:var(--bg1);border:1px solid var(--ln);border-radius:var(--r);color:var(--t0);font-family:var(--mono);font-size:13px;padding:6px 8px;outline:none">
+          <option value="auto">Otomatik (her mesajda)</option>
+          <option value="semi">Yarı Oto (durdurulabilir)</option>
+          <option value="manual">Manuel (yalnızca elle)</option>
+        </select>
+      </div>
+      <div><label style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.08em;text-transform:uppercase;display:block;margin-bottom:4px">ZAMAN ÇARPANı</label>
+        <input type="number" id="rtm-scale" min="0.1" max="10" step="0.1" value="1" style="width:100%;background:var(--bg1);border:1px solid var(--ln);border-radius:var(--r);color:var(--t0);font-family:var(--mono);font-size:13px;padding:6px 8px;outline:none" title="1 = normal, 2 = 2× hızlı, 0.5 = yarı hız">
+      </div>
+    </div>
+    <div style="font-family:var(--mono);font-size:10px;color:var(--t2);padding:8px 10px;background:var(--bg1);border-radius:var(--r);border:1px solid var(--ln)">
+      <i class="fas fa-info-circle" style="color:var(--pu);margin-right:6px"></i>
+      Otomatik ilerleme: &lt;50 kar → 1-2dk · 50-150 → 2-4dk · 150-400 → 5-10dk · 400-800 → 12-20dk · 800+ → 20-30dk. Çarpan bu değerleri ölçekler. Mesaj atarken ⏱ butonu ile anlık override yapılabilir.
+    </div>
+  </div>
+  <div class="mft">
+    <button class="btn btn-g" onclick="CM('m-rp-time')">İptal</button>
+    <button class="btn" style="background:var(--pu);color:#fff" onclick="RpTime.togglePause(S.roomId)"><i class="fas fa-pause"></i> Duraklat / Devam</button>
+    <button class="btn btn-p" onclick="RpTime.saveModal()"><i class="fas fa-save"></i> Kaydet</button>
+  </div>
+</div>
+</div>
+
 <div class="mbd hidden" id="m-admin-login">
 <div class="mbox" style="max-width:320px">
   <div class="mhd"><span class="mti">Observer Erişimi</span><button class="mcl" onclick="CM('m-admin-login')"><i class="fas fa-times"></i></button></div>
@@ -1026,6 +1085,8 @@ const RP={
     const room=S.rooms.find(r=>r.id==id);
     if(room){document.getElementById('room-title').textContent=room.name;document.getElementById('room-desc').textContent=room.description||'';}
     document.querySelectorAll('.room-item').forEach(el=>el.classList.toggle('active',el.dataset.id==id));
+    // Init RP time for this room (fire-and-forget)
+    RpTime.initRoom(id).catch(()=>{});
     // Show cached immediately if available (instant render)
     if(S.msgs[id]&&S.msgs[id].length){UI.renderRoom(id);}
     else{UI.renderRoom(id);} // shows empty state
@@ -1046,6 +1107,13 @@ const RP={
     const txt=inp.value.trim();
     if(!txt&&!S.attach)return;
     const org=RP._org((S.activeChar.organizations||[])[0]||S.activeChar.organization);
+    // Check for manual RP time override
+    const overrideInp=document.getElementById('rp-time-override-inp');
+    const overrideVal=overrideInp?.value.trim()||'';
+    // Get RP time before clearing input (async but fire early)
+    const rpTimePromise=overrideVal?Promise.resolve(overrideVal):RpTime.onMessage(S.roomId,txt);
+    // Reset override bar
+    if(overrideVal&&overrideInp){overrideInp.value='';document.getElementById('rp-time-override-bar').style.display='none';}
     const pl={
       room_id:S.roomId,
       char_id:S.activeChar.id,char_name:S.activeChar.name,
@@ -1055,8 +1123,11 @@ const RP={
       reply_to_id:S.reply?.id||null,
       reply_to_sender:S.reply?.char_name||null,
       reply_to_content:S.reply?.content?.slice(0,100)||null,
-      sent_by_user:S.user?.id||null
+      sent_by_user:S.user?.id||null,
+      rp_time:null // will be set after await below
     };
+    // Await rp_time (usually instant — state already in memory)
+    try{pl.rp_time=await rpTimePromise;}catch(e){}
     inp.value='';inp.style.height='auto';S.attach=null;RP.clearReply();RP.clearTyping();
     if(S._off){
       const loc={...pl,id:'local_'+Date.now(),created_at:new Date().toISOString()};
@@ -1066,12 +1137,32 @@ const RP={
     }
     try{await DB.post('rp_messages',pl);}catch(e){toast('Gönderilemedi','error');}
   },
-  async editMsg(id,newTxt){
+  async editMsg(id,newTxt,newRpTime){
     if(!newTxt.trim())return;
     const m=(S.msgs[S.roomId]||[]).find(x=>x.id==id);if(!m)return;
     m.content=newTxt.trim();m.is_edited=true;
+    const patch={content:newTxt.trim(),is_edited:true};
+    if(newRpTime!==undefined){m.rp_time=newRpTime||null;patch.rp_time=newRpTime||null;}
     UI.updateTxt(id,newTxt.trim(),true);
-    if(!S._off)try{await DB.patch('rp_messages',`id=eq.${id}`,{content:newTxt.trim(),is_edited:true});}catch(e){}
+    // Update RP time badge in the DOM if changed
+    if(newRpTime!==undefined){
+      const el=document.querySelector(`[data-msg-id="${id}"]`);
+      if(el){
+        const ts=el.querySelector('.msg-ts');
+        if(ts){
+          // Rebuild rp time badge
+          const existBadge=ts.querySelector('.msg-rp-ts');
+          if(existBadge)existBadge.remove();
+          if(newRpTime){
+            const badge=document.createElement('span');
+            badge.className='msg-rp-ts';badge.title='RP Zamanı';
+            badge.innerHTML=`${newRpTime.slice(11,16)} <span class="msg-rp-tz">${newRpTime.slice(-3)}</span>`;
+            ts.insertBefore(badge,ts.firstChild);
+          }
+        }
+      }
+    }
+    if(!S._off)try{await DB.patch('rp_messages',`id=eq.${id}`,patch);}catch(e){}
   },
   async delMsg(id){
     // Remove locally first (instant feedback)
@@ -1816,6 +1907,8 @@ const UI={
     const thisUser=msg.sent_by_user||msg.char_id||'';
     const ns=forceNS!==null?forceNS:(prevUser!==thisUser);
     const time=new Date(msg.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    // RP time stamp (if present) — shown alongside real time
+    const rpTimeHtml=msg.rp_time?`<span class="msg-rp-ts" title="RP Zamanı">${msg.rp_time.slice(11,16)} <span class="msg-rp-tz">${msg.rp_time.slice(-3)}</span></span>`:'';
     const replyHtml=msg.reply_to_id?`<div class="msg-reply-ref" onclick="UI.scrollToMsg('${msg.reply_to_id}')"><i class="fas fa-reply" style="font-size:10px;color:var(--ac)"></i><span class="rr-sndr">${(msg.reply_to_sender||'?').replace(/</g,'&lt;')}:</span><span class="rr-txt">${(msg.reply_to_content||'').replace(/</g,'&lt;')}</span></div>`:'';
     const rData=JSON.stringify({id:msg.id,char_name:msg.char_name,content:msg.content}).replace(/"/g,'&quot;');
     const fData=JSON.stringify({id:msg.id,content:msg.content,attachment_url:msg.attachment_url||null}).replace(/"/g,'&quot;');
@@ -1865,11 +1958,11 @@ const UI={
               ${msg.org_name?`<span class="msg-org" style="background:${msg.org_color||''}22;color:${msg.org_color||'var(--t2)'};border:1px solid ${msg.org_color||'transparent'}55">${msg.org_name}</span>`:''}
             </span>
           </span>
-          <span class="msg-ts">${time}${msg.is_edited?'<span class="msg-edited"> (düz)</span>':''}</span>
+          <span class="msg-ts">${rpTimeHtml}${time}${msg.is_edited?'<span class="msg-edited"> (düz)</span>':''}</span>
         </div>`:''}
         ${replyHtml}
         <div class="msg-text">${UI._rc(msg.content)}</div>
-        <div class="msg-edit-wrap"><textarea class="edt-ta" rows="2"></textarea><div class="edt-btns"><button class="edt-save" onclick="UI.saveEdit('${msg.id}',this)">Kaydet</button><button class="edt-cancel" onclick="UI.cancelEdit('${msg.id}')">İptal</button></div></div>
+        <div class="msg-edit-wrap"><textarea class="edt-ta" rows="2"></textarea><div class="edt-rpt"><label><i class="fas fa-clock"></i> RP</label><input class="edt-rpt-inp" type="text" placeholder="${msg.rp_time||'YYYY-MM-DD HH:MM TZ'}" value="${msg.rp_time||''}"></div><div class="edt-btns"><button class="edt-save" onclick="UI.saveEdit('${msg.id}',this)">Kaydet</button><button class="edt-cancel" onclick="UI.cancelEdit('${msg.id}')">İptal</button></div></div>
         ${msg.attachment_url?`<div class="msg-attach"><img src="${msg.attachment_url}" onerror="this.parentNode.remove()" loading="lazy"></div>`:''}
         <div class="msg-reactions" data-msg-id="${msg.id}"></div>
       </div>
@@ -2041,13 +2134,24 @@ const UI={
     const el=document.querySelector(`[data-msg-id="${id}"]`);if(!el)return;
     el.classList.add('msg-editing');
     const ta=el.querySelector('.edt-ta');
+    const rptInp=el.querySelector('.edt-rpt-inp');
     const m=(S.msgs[S.roomId]||[]).find(x=>x.id==id);
     if(ta&&m){ta.value=m.content||'';ta.focus();}
+    if(rptInp&&m){rptInp.value=m.rp_time||'';rptInp.placeholder=m.rp_time||'YYYY-MM-DD HH:MM TZ';}
   },
   saveEdit(id,btn){
     const el=document.querySelector(`[data-msg-id="${id}"]`);if(!el)return;
     const ta=el.querySelector('.edt-ta');if(!ta)return;
-    RP.editMsg(id,ta.value);
+    const rptInp=el.querySelector('.edt-rpt-inp');
+    const newRpTime=rptInp?rptInp.value.trim()||null:undefined;
+    // Failsafe: RP time formatını doğrula (kabul: "YYYY-MM-DD HH:MM TZ" veya boş)
+    if(newRpTime){
+      const orig=(S.msgs[S.roomId]||[]).find(x=>x.id==id)?.rp_time||null;
+      if(orig&&newRpTime!==orig){
+        if(!confirm(`⚠️ RP Zamanı Değişikliği\n\nEski: ${orig}\nYeni: ${newRpTime}\n\nDevam?`))return;
+      }
+    }
+    RP.editMsg(id,ta.value,newRpTime);
   },
   cancelEdit(id){document.querySelector(`[data-msg-id="${id}"]`)?.classList.remove('msg-editing');},
   scrollToMsg(id){
@@ -2071,10 +2175,185 @@ const UI={
 };
 
 /* ═══ OBSERVER AI ════════════════════════════════════════ */
+/* ═══ RP TIME MANAGER ═══════════════════════════════════════════════════════
+   Pure JS — no AI per message. Each room has independent RP timeline.
+   Stored in Firebase: rp_room_time/{roomId}  (single doc per room)
+   Modes: 'auto' (every message), 'manual' (user controls), 'semi' (auto but pauseable)
+   ══════════════════════════════════════════════════════════════════════════ */
+const RpTime={
+  _state:{},   // roomId → {rp_year,rp_month,rp_day,rp_hour,rp_minute,tz,mode,paused,time_scale}
+  _DEFAULT:{rp_year:2025,rp_month:3,rp_day:15,rp_hour:20,rp_minute:0,tz:'EST',mode:'auto',paused:false,time_scale:1},
+
+  // Returns compact RP time string: "2025-03-15 20:00 EST"
+  fmt(st){
+    const y=st.rp_year,mo=String(st.rp_month).padStart(2,'0'),d=String(st.rp_day).padStart(2,'0');
+    const h=String(st.rp_hour).padStart(2,'0'),m=String(st.rp_minute).padStart(2,'0');
+    return `${y}-${mo}-${d} ${h}:${m} ${st.tz}`;
+  },
+
+  // Returns human-readable display: "15 Mar 2025 · 20:00 EST"
+  display(st){
+    const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const mo=MONTHS[(st.rp_month||1)-1]||'Jan';
+    const h=String(st.rp_hour||0).padStart(2,'0'),m=String(st.rp_minute||0).padStart(2,'0');
+    return `${st.rp_day||1} ${mo} ${st.rp_year||2025} · ${h}:${m} ${st.tz||'EST'}`;
+  },
+
+  // Advance time based on message content length
+  // Thresholds tuned for RP-style long messages (emotes, narration)
+  // ~400 chars = typical RP action; ~800+ = detailed emote/scene
+  _advance(st,content=''){
+    if(st.mode==='manual')return st;
+    if(st.mode==='semi'&&st.paused)return st;
+    const len=content.trim().length;
+    let mins=1; // baseline: short OOC or tiny reply
+    if(len>800)mins=Math.floor(20+Math.random()*11);  // 20-30 min (büyük sahne)
+    else if(len>400)mins=Math.floor(12+Math.random()*8); // 12-20 min (normal emote)
+    else if(len>150)mins=Math.floor(5+Math.random()*6);  // 5-10 min (kısa emote)
+    else if(len>50)mins=Math.floor(2+Math.random()*3);   // 2-4 min (diyalog satırı)
+    mins=Math.round(mins*(st.time_scale||1));
+    let total=st.rp_hour*60+st.rp_minute+mins;
+    const days=Math.floor(total/1440);total%=1440;
+    const newState={...st,rp_hour:Math.floor(total/60),rp_minute:total%60};
+    if(days>0){
+      let day=st.rp_day+days,month=st.rp_month,year=st.rp_year;
+      const daysInMonth=[0,31,28,31,30,31,30,31,31,30,31,30,31];
+      const dim=daysInMonth[month]+(month===2&&((year%4===0&&year%100!==0)||year%400===0)?1:0);
+      while(day>dim){day-=dim;month++;if(month>12){month=1;year++;}}
+      newState.rp_day=day;newState.rp_month=month;newState.rp_year=year;
+    }
+    return newState;
+  },
+
+  // Load state for a room from Firebase (or use default)
+  async load(roomId){
+    if(this._state[roomId])return this._state[roomId];
+    try{
+      const {db,fs}=await _fbReady();
+      const snap=await fs.getDoc(fs.doc(db,'rp_room_time',String(roomId)));
+      this._state[roomId]=snap.exists()?{...this._DEFAULT,...snap.data()}:{...this._DEFAULT};
+    }catch(e){this._state[roomId]={...this._DEFAULT};}
+    return this._state[roomId];
+  },
+
+  // Save state to Firebase
+  async _save(roomId,st){
+    try{
+      const {db,fs}=await _fbReady();
+      await fs.setDoc(fs.doc(db,'rp_room_time',String(roomId)),{...st,last_updated_at:new Date().toISOString()},{merge:true});
+    }catch(e){console.warn('[RpTime] Save failed:',e.message);}
+  },
+
+  // Called by RP.send() — advances time and returns rp_time string to embed in message
+  async onMessage(roomId,content){
+    const st=await this.load(roomId);
+    const newSt=this._advance(st,content);
+    this._state[roomId]=newSt;
+    this._save(roomId,newSt); // fire-and-forget
+    this._updateUI(roomId,newSt);
+    return this.fmt(newSt);
+  },
+
+  // Get current RP time string (for OAI/DM context injection)
+  get(roomId){
+    const st=this._state[roomId];
+    return st?this.fmt(st):null;
+  },
+
+  // Manual time set
+  async set(roomId,{year,month,day,hour,minute,tz,mode,paused,time_scale}={}){
+    const st=await this.load(roomId);
+    const newSt={...st};
+    if(year!==undefined)newSt.rp_year=parseInt(year);
+    if(month!==undefined)newSt.rp_month=parseInt(month);
+    if(day!==undefined)newSt.rp_day=parseInt(day);
+    if(hour!==undefined)newSt.rp_hour=parseInt(hour);
+    if(minute!==undefined)newSt.rp_minute=parseInt(minute);
+    if(tz!==undefined)newSt.tz=tz;
+    if(mode!==undefined)newSt.mode=mode;
+    if(paused!==undefined)newSt.paused=paused;
+    if(time_scale!==undefined)newSt.time_scale=parseFloat(time_scale)||1;
+    this._state[roomId]=newSt;
+    await this._save(roomId,newSt);
+    this._updateUI(roomId,newSt);
+    toast(`Zaman güncellendi: ${this.display(newSt)}`,'success');
+  },
+
+  // Toggle pause (semi mode)
+  async togglePause(roomId){
+    const st=await this.load(roomId);
+    await this.set(roomId,{paused:!st.paused});
+    toast(st.paused?'Zaman akışı devam ediyor':'Zaman akışı duraklatıldı','info');
+  },
+
+  // Update the time display in the UI header
+  _updateUI(roomId,st){
+    if(roomId!==S.roomId)return;
+    const el=document.getElementById('rp-time-display');
+    if(el)el.textContent=this.display(st);
+    const pill=document.getElementById('rp-time-pill');
+    if(pill){
+      pill.title=`Mod: ${st.mode}${st.paused?' (duraklı)':''}`;
+      pill.className='rp-time-pill'+(st.mode==='manual'?' rpt-manual':st.paused?' rpt-paused':'');
+    }
+  },
+
+  // Initialize when room loads
+  async initRoom(roomId){
+    const st=await this.load(roomId);
+    this._updateUI(roomId,st);
+    return st;
+  },
+
+  // Open the time manager modal
+  openModal(roomId){
+    const st=this._state[roomId]||this._DEFAULT;
+    document.getElementById('rtm-year').value=st.rp_year;
+    document.getElementById('rtm-month').value=st.rp_month;
+    document.getElementById('rtm-day').value=st.rp_day;
+    document.getElementById('rtm-hour').value=st.rp_hour;
+    document.getElementById('rtm-minute').value=st.rp_minute;
+    document.getElementById('rtm-tz').value=st.tz||'EST';
+    document.getElementById('rtm-mode').value=st.mode||'auto';
+    document.getElementById('rtm-scale').value=st.time_scale||1;
+    OM('m-rp-time');
+  },
+  async saveModal(){
+    const roomId=S.roomId;if(!roomId)return;
+    const st=this._state[roomId]||this._DEFAULT;
+    const newYear=parseInt(document.getElementById('rtm-year').value);
+    const newMonth=parseInt(document.getElementById('rtm-month').value);
+    const newDay=parseInt(document.getElementById('rtm-day').value);
+    const newMode=document.getElementById('rtm-mode').value;
+    const newScale=parseFloat(document.getElementById('rtm-scale').value)||1;
+    // Failsafe — tarih değişikliği veya mod değişikliği kritik
+    const dateChanged=(newYear!==st.rp_year||newMonth!==st.rp_month||newDay!==st.rp_day);
+    const modeChanged=newMode!==st.mode;
+    const scaleChanged=newScale!==st.time_scale;
+    if(dateChanged||modeChanged||scaleChanged){
+      const warnings=[];
+      if(dateChanged)warnings.push(`📅 Tarih: ${st.rp_day}/${st.rp_month}/${st.rp_year} → ${newDay}/${newMonth}/${newYear}`);
+      if(modeChanged)warnings.push(`⚙️ Mod: ${st.mode} → ${newMode}`);
+      if(scaleChanged)warnings.push(`⏩ Zaman çarpanı: ${st.time_scale||1}× → ${newScale}×`);
+      if(!confirm(`⚠️ RP Zaman Değişikliği\n\n${warnings.join('\n')}\n\nBu değişiklikler tüm sonraki mesajları etkiler. Devam edilsin mi?`))return;
+    }
+    await this.set(roomId,{
+      year:newYear,month:newMonth,day:newDay,
+      hour:document.getElementById('rtm-hour').value,
+      minute:document.getElementById('rtm-minute').value,
+      tz:document.getElementById('rtm-tz').value,
+      mode:newMode,
+      time_scale:newScale,
+    });
+    CM('m-rp-time');
+  },
+};
+
 const OAI={
   running:false,
+  _worldSnapshot:null, // one-time compact world context, built on start()
   stats:{runs:0,msgs:0,sums:0,incs:0,mems:0,errors:0,lastRun:null},
-  CFG:{BATCH_WINDOW_MS:60000,MIN_BATCH:3,MAX_BATCH:40,INACTIVITY_MS:90000,DRY_RUN:false,WRITE_SUMMARIES:true,WRITE_INCIDENTS:true,WRITE_MEMORIES:true,WRITE_REL_CHANGES:true,MIN_CONFIDENCE:0.4},
+  CFG:{BATCH_WINDOW_MS:300000,MIN_BATCH:20,MAX_BATCH:50,INACTIVITY_MS:300000,DRY_RUN:false,WRITE_SUMMARIES:true,WRITE_INCIDENTS:true,WRITE_MEMORIES:true,WRITE_REL_CHANGES:true,MIN_CONFIDENCE:0.4},
   Batcher:{
     buf:[],ft:null,it:null,proc:false,
     ingest(msgs){
@@ -2092,8 +2371,32 @@ const OAI={
       finally{this.proc=false;}
     }
   },
+  _buildWorldSnapshot(){
+    // Compact one-time NYC_DB snapshot — only built once per session
+    const chars=S.chars.filter(c=>c.status!=='Deceased').map(c=>{
+      const org=S.oi.get((c.organizations||[])[0]||c.organization);
+      return `${c.id}|${c.name}${c.alias?'|'+c.alias:''}|${org?.name||'none'}|${c.status||'active'}|${c.role||''}`;
+    });
+    const orgs=S.orgs.map(o=>`${o.id}|${o.name}|${o.type||''}|${o.status||''}`);
+    // Faction / notable locations / vehicles from raw DB if available
+    const factions=(S._db?.factions||[]).map(f=>`${f.id}|${f.name}|${f.type||''}`);
+    const locs=(S._db?.locations||[]).slice(0,30).map(l=>`${l.id||l.name}|${l.name}|${l.type||''}`);
+    return [
+      '=== NYC_DB WORLD SNAPSHOT (session start) ===',
+      `CHARS(${chars.length}): `+chars.join(' / '),
+      `ORGS(${orgs.length}): `+orgs.join(' / '),
+      factions.length?`FACTIONS(${factions.length}): `+factions.join(' / '):'',
+      locs.length?`LOCATIONS(${locs.length}): `+locs.join(' / '):'',
+      '=== END SNAPSHOT ==='
+    ].filter(Boolean).join('\n');
+  },
   start(){
     if(this.running)return;this.running=true;
+    // Build world snapshot once from already-loaded S.chars / S.orgs
+    if(!this._worldSnapshot&&S.chars.length){
+      this._worldSnapshot=this._buildWorldSnapshot();
+      console.log(`[OAI] World snapshot built — ${S.chars.length} chars, ${S.orgs.length} orgs`);
+    }
     Adm.setSt('active','Active');
     const p=document.getElementById('ai-pill');p.classList.add('on');document.getElementById('ai-pill-txt').textContent='AI ON';
     toast('Observer AI başlatıldı','success');
@@ -2107,10 +2410,25 @@ const OAI={
     this.stats.runs++;this.stats.msgs+=messages.length;this.stats.lastRun=new Date().toISOString();
     const p=document.getElementById('ai-pill');p.classList.remove('on');p.classList.add('thinking');document.getElementById('ai-pill-txt').textContent='AI…';
     try{
-      const chars=S.chars.filter(c=>c.status!=='Deceased').map(c=>{const o=S.oi.get((c.organizations||[])[0]||c.organization);return `• ${c.name} [${c.id}] alias="${c.alias||''}" org="${o?.name||'None'}"`;}).join('\n');
-      const orgs=S.orgs.map(o=>`• ${o.name} [${o.id}]`).join('\n');
-      const tr=messages.map(m=>{const t=new Date(m.created_at).toISOString().slice(11,16);return `[${t}] ${m.char_name}${m.char_alias?` "${m.char_alias}"`:''}${m.org_name?` [${m.org_name}]`:''}: ${m.content}`;}).join('\n');
-      const prompt=`You are NYC_DB Observer AI. Observe only. Return ONLY valid JSON.\nROSTER:\nCHARACTERS:\n${chars}\nORGANIZATIONS:\n${orgs}\nTRANSCRIPT:\n${tr}\nRespond:{"session_summary":{"title":"","summary":"","involved_chars":[],"involved_orgs":[],"significance":"low"},"incidents":[{"title":"","incident_type":"confrontation","severity":"low","description":"","location_name":"","involved_chars":[],"involved_orgs":[],"source_confidence":0.0}],"character_memories":[{"char_id":"","char_name":"","memory_type":"event","title":"","content":"","emotional_tag":"neutral","importance":50,"about_chars":[]}],"relationship_changes":[{"entity_a_id":"","entity_a_name":"","entity_a_type":"character","entity_b_id":"","entity_b_name":"","entity_b_type":"character","change_type":"neutral","direction":"mutual","trust_delta":0,"description":""}],"flags":{"requires_admin_review":false,"review_reason":""}}`;
+      // Extract only chars/orgs actually present in this batch — token efficient
+      const batchCharIds=new Set(messages.map(m=>m.char_id).filter(Boolean));
+      const batchOrgIds=new Set(messages.map(m=>m.org_id).filter(Boolean));
+      const involvedChars=S.chars.filter(c=>batchCharIds.has(c.id)||batchCharIds.has(String(c.id)));
+      const involvedOrgs=S.orgs.filter(o=>batchOrgIds.has(o.id)||batchOrgIds.has(String(o.id)));
+      // Also include orgs of involved chars (context)
+      involvedChars.forEach(c=>{
+        const oid=(c.organizations||[])[0]||c.organization;
+        if(oid){const o=S.oi.get(oid);if(o&&!involvedOrgs.find(x=>x.id===o.id))involvedOrgs.push(o);}
+      });
+      const charLines=involvedChars.map(c=>{const o=S.oi.get((c.organizations||[])[0]||c.organization);return `• ${c.name} [${c.id}]${c.alias?` aka "${c.alias}"`:''}${o?` — ${o.name}`:''}${c.status&&c.status!=='Active'?` [${c.status}]`:''}`;}).join('\n');
+      const orgLines=involvedOrgs.map(o=>`• ${o.name} [${o.id}]${o.type?` (${o.type})`:''}${o.status?` [${o.status}]`:''}`).join('\n');
+      const tr=messages.map(m=>{
+        const t=new Date(m.created_at).toISOString().slice(11,16);
+        const rpT=m.rp_time?` {${m.rp_time}}`:'';
+        return `[${t}${rpT}] ${m.char_name}${m.char_alias?` "${m.char_alias}"`:''}${m.org_name?` [${m.org_name}]`:''}: ${m.content}`;
+      }).join('\n');
+      const worldCtx=this._worldSnapshot?`\nWORLD CONTEXT (NYC_DB — read only, for reference):\n${this._worldSnapshot}\n`:'';
+      const prompt=`You are NYC_DB Observer AI. Observe only. Return ONLY valid JSON.${worldCtx}\nINVOLVED CHARACTERS:\n${charLines||'(unknown)'}\nINVOLVED ORGANIZATIONS:\n${orgLines||'(none)'}\nTRANSCRIPT (${messages.length} messages):\n${tr}\nRespond:{"session_summary":{"title":"","summary":"","involved_chars":[],"involved_orgs":[],"significance":"low"},"incidents":[{"title":"","incident_type":"confrontation","severity":"low","description":"","location_name":"","involved_chars":[],"involved_orgs":[],"source_confidence":0.0}],"character_memories":[{"char_id":"","char_name":"","memory_type":"event","title":"","content":"","emotional_tag":"neutral","importance":50,"about_chars":[]}],"relationship_changes":[{"entity_a_id":"","entity_a_name":"","entity_a_type":"character","entity_b_id":"","entity_b_name":"","entity_b_type":"character","change_type":"neutral","direction":"mutual","trust_delta":0,"description":""}],"flags":{"requires_admin_review":false,"review_reason":""}}`;
       // Shared Gemini REST — Firebase AI Logic artık kullanılmıyor
       const parsed = await _geminiGenerate(prompt, { json:true, temperature:0.2, topP:0.8, maxOutputTokens:2048 });
       if(!this.CFG.DRY_RUN){
