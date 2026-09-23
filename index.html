@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -249,6 +250,26 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 #mem-header{height:var(--hh);padding:0 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--ln);flex-shrink:0}
 .mem-title{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase}
 #members-list{flex:1;overflow-y:auto;padding:8px 0}
+/* MA sidebar widget */
+#ma-sidebar{border-bottom:1px solid var(--ln);flex-shrink:0;display:flex;flex-direction:column;max-height:260px}
+#ma-sb-head{display:flex;align-items:center;justify-content:space-between;padding:6px 12px;background:var(--bg0);border-bottom:1px solid var(--ln);cursor:pointer;user-select:none}
+#ma-sb-head:hover{background:var(--bg2)}
+.ma-sb-title{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--pu);display:flex;align-items:center;gap:5px}
+#ma-sb-toggle-icon{color:var(--t3);font-size:10px;transition:transform .2s}
+#ma-sb-body{display:flex;flex-direction:column;flex:1;overflow:hidden}
+#ma-sb-log{flex:1;overflow-y:auto;padding:6px 10px;display:flex;flex-direction:column;gap:6px;min-height:0}
+.ma-sb-msg{font-size:11px;line-height:1.55;border-radius:7px;padding:5px 9px;max-width:100%;word-break:break-word}
+.ma-sb-msg.user{align-self:flex-end;background:rgba(155,111,212,.15);border:1px solid rgba(155,111,212,.2);color:var(--t0)}
+.ma-sb-msg.model{align-self:flex-start;background:var(--bg3);border:1px solid var(--ln);color:var(--t1)}
+.ma-sb-msg.thinking{color:var(--t3);background:none;border:none;font-style:italic}
+#ma-sb-quick{display:flex;gap:4px;flex-wrap:wrap;padding:5px 10px;border-top:1px solid var(--ln);background:var(--bg0);flex-shrink:0}
+.ma-sb-qbtn{font-family:var(--mono);font-size:9px;font-weight:600;padding:3px 7px;border-radius:4px;border:1px solid var(--ln2);background:var(--bg2);color:var(--t2);cursor:pointer;transition:all .12s;white-space:nowrap}
+.ma-sb-qbtn:hover{border-color:var(--pu);color:var(--pu);background:rgba(155,111,212,.1)}
+#ma-sb-inp-row{display:flex;gap:5px;padding:6px 10px;border-top:1px solid var(--ln);flex-shrink:0}
+#ma-sb-inp{flex:1;background:var(--bg2);border:1px solid var(--ln);color:var(--t1);border-radius:6px;padding:5px 8px;font-family:var(--sans);font-size:11px;outline:none;transition:border-color var(--tr)}
+#ma-sb-inp:focus{border-color:rgba(155,111,212,.5)}
+#ma-sb-send{background:rgba(155,111,212,.2);border:1px solid rgba(155,111,212,.3);color:var(--pu);border-radius:6px;padding:5px 8px;cursor:pointer;font-size:11px;transition:all .12s;flex-shrink:0}
+#ma-sb-send:hover{background:rgba(155,111,212,.4)}
 .mem-sec{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;padding:8px 14px 4px}
 .mem-item{display:flex;align-items:center;gap:8px;padding:4px 14px;transition:background var(--tr)}
 .mem-item:hover{background:var(--bg3)}
@@ -490,6 +511,35 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 </div>
 <div id="members-panel">
   <div id="mem-header"><span class="mem-title">Online</span><span style="font-family:var(--mono);font-size:10px;color:var(--t3)" id="mem-cnt">0</span></div>
+
+  <!-- ── Master Agent sidebar widget ── -->
+  <div id="ma-sidebar">
+    <!-- Collapsible header -->
+    <div id="ma-sb-head" onclick="MASidebar.toggle()">
+      <span class="ma-sb-title"><i class="fas fa-robot"></i> Master Agent</span>
+      <i class="fas fa-chevron-up" id="ma-sb-toggle-icon"></i>
+    </div>
+    <div id="ma-sb-body">
+      <!-- Chat log -->
+      <div id="ma-sb-log">
+        <div class="ma-sb-msg model" style="color:var(--t3);font-style:italic;background:none;border:none">Merhaba! Bir şey sor veya hızlı aksiyon seç.</div>
+      </div>
+      <!-- Quick buttons -->
+      <div id="ma-sb-quick">
+        <button class="ma-sb-qbtn" onclick="MASidebar.quick('Mevcut RP durumunu özetle.')">📋 Durum</button>
+        <button class="ma-sb-qbtn" onclick="MASidebar.quick('Observer AI birikmiş mesajlarını hemen işle. FLUSH_OAI')">⚡ OAI</button>
+        <button class="ma-sb-qbtn" onclick="MASidebar.quick('DM bağlamını güncelle. READ_DM')">📖 DM</button>
+        <button class="ma-sb-qbtn" onclick="MASidebar.quick('Sahneye uygun bir dispatch öner. GEN_EVENT')">🌐 Olay</button>
+        <button class="ma-sb-qbtn" onclick="MASidebar.setupAct()">⏰ Setup At</button>
+      </div>
+      <!-- Input -->
+      <div id="ma-sb-inp-row">
+        <input id="ma-sb-inp" placeholder="Bir şey sor…" onkeydown="if(event.key==='Enter')MASidebar.send()">
+        <button id="ma-sb-send" onclick="MASidebar.send()"><i class="fas fa-paper-plane"></i></button>
+      </div>
+    </div>
+  </div>
+
   <div id="members-list"></div>
 </div>
 </div></div><!-- /view-rp -->
@@ -3390,6 +3440,7 @@ Login._start=async function(u){
       <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Observer AI birikmiş mesajlarını hemen işle ve bana sonuçları söyle. FLUSH_OAI')"><i class="fas fa-bolt"></i> OAI Flush</button>
       <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('DM bağlamını şimdi güncelle ve son gelişmeleri özetle. READ_DM')"><i class="fas fa-book-open"></i> DM Güncelle</button>
       <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Mevcut RP atmosferine uygun bir dünya olayı öner. GEN_EVENT')"><i class="fas fa-globe"></i> Olay Öner</button>
+      <button class="adm-btn" style="font-size:10px;border-color:rgba(232,167,74,.4);color:var(--am)" onclick="(()=>{const rt=S.roomId?RpTime.get(S.roomId):'—';MasterAgent.send('Şu an RP zamanı: '+rt+'. Bir sahne veya olay zamanı ayarlamak istiyorum. Bana öneriler ver ve ne zaman ne yapabileceğimizi planla (mevcut RP saatini baz alarak).');})()"><i class="fas fa-clock"></i> Setup At</button>
       <button class="adm-btn" style="font-size:10px;margin-left:auto;color:var(--rd)" onclick="MasterAgent.clear()"><i class="fas fa-trash"></i> Sohbeti Temizle</button>
     </div>
 
@@ -3766,6 +3817,79 @@ const MasterAgent = {
 };
 
 window.MasterAgent = MasterAgent;
+
+/* ════════════════════════════════════════════════════════
+   MA SIDEBAR  — compact Master Agent widget in members panel
+   Shares MasterAgent._history so context is unified.
+════════════════════════════════════════════════════════ */
+const MASidebar = {
+  _collapsed: false,
+
+  toggle() {
+    this._collapsed = !this._collapsed;
+    const body = document.getElementById('ma-sb-body');
+    const icon = document.getElementById('ma-sb-toggle-icon');
+    if (body) body.style.display = this._collapsed ? 'none' : 'flex';
+    if (icon) icon.style.transform = this._collapsed ? 'rotate(180deg)' : '';
+  },
+
+  quick(text) {
+    const inp = document.getElementById('ma-sb-inp');
+    if (inp) inp.value = text;
+    this.send();
+  },
+
+  /* ── Setup At — ask MA to schedule a scene/event ── */
+  setupAct() {
+    const rpTime = S.roomId ? RpTime.get(S.roomId) : '—';
+    this.quick(`Şu an RP zamanı: ${rpTime}. Benden bir sahne veya olay zamanı ayarlamamı istiyorsun. Hangi saatte ne yapalım? (örn: "saat 22:00'de polis baskını" veya "sabah 08:00'de bir soygun hazırlığı")`);
+  },
+
+  send() {
+    const inp = document.getElementById('ma-sb-inp');
+    if (!inp) return;
+    const txt = inp.value.trim();
+    if (!txt) return;
+    inp.value = '';
+    this._appendMsg(txt, 'user');
+    this._appendMsg('…', 'thinking');
+    MasterAgent.send(txt).then(() => {
+      this._syncLastReply();
+    });
+  },
+
+  _appendMsg(text, role) {
+    const log = document.getElementById('ma-sb-log');
+    if (!log) return;
+    // Remove thinking bubble before adding real reply
+    if (role !== 'thinking') {
+      const thinking = log.querySelector('.thinking');
+      if (thinking) thinking.remove();
+    }
+    const div = document.createElement('div');
+    div.className = 'ma-sb-msg ' + role;
+    div.innerHTML = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  },
+
+  _syncLastReply() {
+    // Get the last model reply from shared MasterAgent history
+    const hist = MasterAgent._history;
+    const last = [...hist].reverse().find(h => h.role === 'model');
+    if (!last) return;
+    const text = last.parts[0]?.text || '';
+    // Remove thinking indicator first
+    const log = document.getElementById('ma-sb-log');
+    if (log) {
+      const thinking = log.querySelector('.thinking');
+      if (thinking) thinking.remove();
+    }
+    this._appendMsg(text, 'model');
+  },
+};
+
+window.MASidebar = MASidebar;
 </script>
 
 <script src="rp_features.js"></script>
