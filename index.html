@@ -486,11 +486,11 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
       </div>
       <i class="fas fa-sign-out-alt" style="font-size:11px;color:var(--t3)"></i>
     </div>
-    <div class="sb-char" id="char-sel-btn">
-      <div class="ava-sm" id="ac-ava" style="position:relative"><span id="ac-ini">?</span></div>
+    <div class="sb-char" id="char-sel-btn" title="Sahneye karakter ekle / çıkar">
+      <i class="fas fa-users" style="font-size:11px;color:var(--t3);flex-shrink:0"></i>
       <div style="flex:1;min-width:0">
-        <div style="font-size:12px;font-weight:500;color:var(--t0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="ac-name">Karakter seç</div>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="ac-org">tıkla ↑</div>
+        <div style="font-size:12px;font-weight:500;color:var(--t0)" id="ac-name">Sahne Karakterleri</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--t2)" id="ac-org">tıkla → ekle / çıkar</div>
       </div>
       <i class="fas fa-chevron-up" style="font-size:10px;color:var(--t3)"></i>
     </div>
@@ -538,9 +538,10 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
         <button onclick="document.getElementById('rp-time-override-bar').style.display='none';document.getElementById('rp-time-override-inp').value=''" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:11px;padding:0 2px">✕</button>
       </div>
       <div id="input-toolbar">
-        <button class="tb-btn" onclick="RP.toggleEmoji(event)"><i class="far fa-smile"></i></button>
-        <button class="tb-btn" onclick="RP.promptAttach()"><i class="fas fa-image"></i></button>
+        <button class="tb-btn" onclick="RP.toggleEmoji(event)" title="Emoji"><i class="far fa-smile"></i></button>
+        <button class="tb-btn" onclick="RP.promptAttach()" title="Resim ekle"><i class="fas fa-image"></i></button>
         <button class="tb-btn" id="btn-rpt-override" title="RP Zamanı override" onclick="const b=document.getElementById('rp-time-override-bar');const shown=b.style.display==='flex';b.style.display=shown?'none':'flex';if(!shown){const st=RpTime._state[S.roomId];if(st)document.getElementById('rp-time-override-inp').placeholder=RpTime.fmt(st)+' (boş = otomatik)';document.getElementById('rp-time-override-inp').focus();}"><i class="fas fa-clock" style="color:var(--pu);opacity:.7"></i></button>
+        <button class="tb-btn" id="ac-toggle-btn" title="Otomatik tamamlama aç/kapat" onclick="Autocomplete.toggleEnabled()" style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.04em;color:var(--t2)">AC</button>
         <span class="tb-spc"></span>
         <button id="send-btn" onclick="RP.send()"><i class="fas fa-paper-plane"></i> SEND</button>
       </div>
@@ -1213,11 +1214,21 @@ const RP={
     RT.connect(id);
   },
   async send(){
-    if(!S.activeChar){toast('Önce karakter seç!','error');RP.openPicker();return;}
     const inp=document.getElementById('msg-input');
     const txt=inp.value.trim();
     if(!txt&&!S.attach)return;
-    const org=RP._org((S.activeChar.organizations||[])[0]||S.activeChar.organization);
+    // Hangi karakterle gönderilecek: metin "İsim: ..." içeriyorsa ilk satırdaki ismi bul
+    // Aksi takdirde S.activeChar var mı bak, yoksa kullanıcı adını kullan
+    let sendChar=S.activeChar||null;
+    const firstLine=(txt.split('\n')[0]||'').trim();
+    const namePrefix=firstLine.match(/^(.+?):\s/);
+    if(namePrefix){
+      const nm=namePrefix[1].trim();
+      const found=S.chars?.find(c=>c.name===nm||(c.alias&&c.alias===nm));
+      if(found) sendChar=found;
+    }
+    if(!sendChar&&S.activeChars?.length){sendChar=S.activeChars[0];}
+    const org=sendChar?RP._org((sendChar.organizations||[])[0]||sendChar.organization):null;
     // Check for manual RP time override
     const overrideInp=document.getElementById('rp-time-override-inp');
     const overrideVal=overrideInp?.value.trim()||'';
@@ -1227,8 +1238,8 @@ const RP={
     if(overrideVal&&overrideInp){overrideInp.value='';document.getElementById('rp-time-override-bar').style.display='none';}
     const pl={
       room_id:S.roomId,
-      char_id:S.activeChar.id,char_name:S.activeChar.name,
-      char_alias:S.activeChar.alias||'',char_avatar:S.activeChar.image||'',
+      char_id:sendChar?.id||null,char_name:sendChar?.name||S.user?.name||'?',
+      char_alias:sendChar?.alias||'',char_avatar:sendChar?.image||'',
       org_id:org?.id||null,org_name:org?.name||null,org_color:org?.color||null,
       content:txt,attachment_url:S.attach||null,reactions:{},is_edited:false,
       reply_to_id:S.reply?.id||null,
@@ -1248,11 +1259,9 @@ const RP={
     }
     try{
       const ref = await DB.post('rp_messages',pl);
-      // Auto-react: sadece MA'nın bir karakterine reply gelince devreye gir
+      // Auto-react: reply_to_id varsa ve MA'nın gönderdiği mesajsa tetikle
       if(window.MasterAgent && MasterAgent._autoEnabled !== false){
-        const msgId = ref?.id || null;
         const replyToId = pl.reply_to_id || null;
-        // replyToId, MA'nın gönderdiği bir mesajın ID'si mi?
         const maReplied = replyToId && MasterAgent._sentIds?.has(replyToId);
         if(maReplied){
           setTimeout(()=>MasterAgent._autoReact(pl), 1200);
@@ -1300,12 +1309,14 @@ const RP={
     }
   },
   async react(msgId,emoji){
-    if(!S.activeChar)return;
+    const reactor=S.activeChar||S.activeChars?.[0]||null;
+    const reactId=reactor?.id||S.user?.id||null;
+    if(!reactId)return;
     const m=(S.msgs[S.roomId]||[]).find(x=>x.id==msgId);if(!m)return;
     const r={...(m.reactions||{})};
     if(!r[emoji])r[emoji]=[];
-    const i=r[emoji].indexOf(S.activeChar.id);
-    if(i===-1)r[emoji].push(S.activeChar.id);else r[emoji].splice(i,1);
+    const i=r[emoji].indexOf(reactId);
+    if(i===-1)r[emoji].push(reactId);else r[emoji].splice(i,1);
     if(r[emoji].length===0)delete r[emoji];
     m.reactions=r;
     if(!S._off)try{await DB.patch('rp_messages',`id=eq.${msgId}`,{reactions:r});}catch(e){}
@@ -1367,10 +1378,10 @@ const RP={
       btn.onmouseenter=()=>btn.style.background='var(--bg4)';btn.onmouseleave=()=>btn.style.background='var(--bg3)';
       btn.onclick=async()=>{
         CM('m-forward');
-        if(!S.activeChar){toast('Karakter seç','error');return;}
-        const org=RP._org((S.activeChar.organizations||[])[0]||S.activeChar.organization);
+        const fwdChar=S.activeChar||S.activeChars?.[0]||null;
+        const org=fwdChar?RP._org((fwdChar.organizations||[])[0]||fwdChar.organization):null;
         try{
-          await DB.post('rp_messages',{room_id:room.id,char_id:S.activeChar.id,char_name:S.activeChar.name,char_alias:S.activeChar.alias||'',char_avatar:S.activeChar.image||'',org_id:org?.id||null,org_name:org?.name||null,org_color:org?.color||null,content:'↗ İletildi: '+d.content,attachment_url:d.attachment_url||null,reactions:{},is_edited:false,sent_by_user:S.user?.id||null});
+          await DB.post('rp_messages',{room_id:room.id,char_id:fwdChar?.id||null,char_name:fwdChar?.name||S.user?.name||'?',char_alias:fwdChar?.alias||'',char_avatar:fwdChar?.image||'',org_id:org?.id||null,org_name:org?.name||null,org_color:org?.color||null,content:'↗ İletildi: '+d.content,attachment_url:d.attachment_url||null,reactions:{},is_edited:false,sent_by_user:S.user?.id||null});
           toast(`#${room.name} odasına iletildi`,'success');
         }catch(e){toast('İletilemedi','error');}
       };
@@ -1509,12 +1520,13 @@ const RP={
   },
   /* typing */
   sendTyping(){
-    if(!S.activeChar||S._off)return;
+    if(S._off||!S.user)return;
+    const pc=S.activeChar||S.activeChars?.[0]||null;
     clearTimeout(S._tt);
     DB.upsert('rp_presence','char_id',{
-      char_id:S.activeChar.id,char_name:S.activeChar.name,
-      char_alias:S.activeChar.alias||'',
-      org_id:(S.activeChar.organizations||[])[0]||S.activeChar.organization||null,
+      char_id:pc?.id||('user_'+S.user.id),char_name:pc?.name||S.user.name,
+      char_alias:pc?.alias||'',
+      org_id:pc?(pc.organizations||[])[0]||pc.organization||null:null,
       last_seen:new Date().toISOString(),is_typing:true,
       room_id:S.roomId,
       reader_user_id:S.user?.id||null,
@@ -1523,22 +1535,24 @@ const RP={
   },
   clearTyping(){
     clearTimeout(S._tt);
-    if(!S.activeChar||S._off)return;
+    if(S._off||!S.user)return;
+    const pc=S.activeChar||S.activeChars?.[0]||null;
     DB.upsert('rp_presence','char_id',{
-      char_id:S.activeChar.id,char_name:S.activeChar.name,
-      char_alias:S.activeChar.alias||'',
-      org_id:(S.activeChar.organizations||[])[0]||S.activeChar.organization||null,
+      char_id:pc?.id||('user_'+S.user.id),char_name:pc?.name||S.user.name,
+      char_alias:pc?.alias||'',
+      org_id:pc?(pc.organizations||[])[0]||pc.organization||null:null,
       last_seen:new Date().toISOString(),is_typing:false,
       room_id:S.roomId,
       reader_user_id:S.user?.id||null,
     }).catch(()=>{});
   },
   _hb(){
-    if(!S.activeChar||S._off)return;
+    if(S._off||!S.user)return;
+    const pc=S.activeChar||S.activeChars?.[0]||null;
     DB.upsert('rp_presence','char_id',{
-      char_id:S.activeChar.id,char_name:S.activeChar.name,
-      char_alias:S.activeChar.alias||'',
-      org_id:(S.activeChar.organizations||[])[0]||S.activeChar.organization||null,
+      char_id:pc?.id||('user_'+S.user.id),char_name:pc?.name||S.user.name,
+      char_alias:pc?.alias||'',
+      org_id:pc?(pc.organizations||[])[0]||pc.organization||null:null,
       last_seen:new Date().toISOString(),is_typing:false,
       room_id:S.roomId,
       reader_user_id:S.user?.id||null,
@@ -2228,16 +2242,18 @@ const UI={
     list.appendChild(el);
   },
   updChar(char){
-    const org=RP._org((char.organizations||[])[0]||char.organization);
-    const ini=(char.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-    const av=document.getElementById('ac-ava');
-    av.innerHTML=char.image?`<img src="${char.image}" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.parentNode.innerHTML='${ini}'">`:`<span>${ini}</span>`;
-    document.getElementById('ac-name').textContent=char.name;
-    document.getElementById('ac-org').textContent=org?org.name:'Affiliasyonsuz';
+    // Artık primary karakter göstermiyoruz — sahne sayısını güncelle
+    const cnt=S.activeChars?.length||0;
+    const nm=document.getElementById('ac-name');
+    const og=document.getElementById('ac-org');
+    if(nm) nm.textContent='Sahne Karakterleri';
+    if(og) og.textContent=cnt?`${cnt} karakter sahnede`:'tıkla → ekle / çıkar';
   },
   renderTags(){
     const bar=document.getElementById('entity-chips');if(!bar)return;
     bar.innerHTML='';
+    // Sidebar sayaç güncelle
+    {const cnt=S.activeChars?.length||0;const og=document.getElementById('ac-org');if(og)og.textContent=cnt?`${cnt} karakter sahnede`:'tıkla → ekle / çıkar';}
     S.activeChars.forEach(c=>{
       const org=RP._org((c.organizations||[])[0]||c.organization);
       const isP=S.activeChar?.id===c.id;
@@ -3243,11 +3259,12 @@ const Autocomplete = {
     this._enabled = !this._enabled;
     const btn = document.getElementById('ac-toggle-btn');
     if (btn) {
-      btn.style.opacity = this._enabled ? '.7' : '.3';
+      btn.style.color = this._enabled ? 'var(--ac)' : 'var(--t3)';
       btn.style.textDecoration = this._enabled ? '' : 'line-through';
-      btn.title = this._enabled ? 'Otomatik tamamlama aç/kapat' : 'Otomatik tamamlama KAPALI';
+      btn.title = this._enabled ? 'Otomatik tamamlama AÇIK (kapat)' : 'Otomatik tamamlama KAPALI (aç)';
     }
     if (!this._enabled) this.hide();
+    toast(`Otomatik tamamlama ${this._enabled ? 'açıldı' : 'kapatıldı'}`, this._enabled ? 'success' : '');
   },
 
   // Tag tipleri ve arama kaynakları
@@ -4316,7 +4333,7 @@ const MasterAgent = {
     const dmCtx = (typeof window.DMEngine !== 'undefined' && DMEngine.getContext)
       ? DMEngine.getContext().toString().slice(0, 2000)
       : '(DM Engine bağlı değil)';
-    const activeChar = S.activeChar ? `${S.activeChar.name} (ID: ${S.activeChar.id})` : '(seçilmedi)';
+    const activeCharList = (S.activeChars||[]).map(c=>c.name).join(', ') || '(yok)';
     const activeRoom = S.roomId || '(oda yok)';
 
     return [
@@ -4324,7 +4341,7 @@ const MasterAgent = {
       `Gerçek zaman: ${now}`,
       `RP zamanı: ${rpTime}`,
       `Aktif oda: ${activeRoom}`,
-      `Aktif karakter: ${activeChar}`,
+      `Sahnedeki karakterler: ${activeCharList}`,
       '',
       'Sen NYC_DB roleplay sunucusunun ana yapay zeka yöneticisisin (Master Agent).',
       'GÖREVLER:',
@@ -4374,6 +4391,11 @@ const MasterAgent = {
       '  → Kullanıcı "bunu kaydet" veya "bu karakteri sakla" dediğinde kullan.',
       '  → Kaydettikten sonra bir sonraki SEND_MSG\'de char_id olarak yeni ID\'yi kullanabilirsin.',
       '  → org_id ve alias opsiyoneldir.',
+      '',
+      '== ETİKET SİSTEMİ ==',
+      'RP mesajlarında [Karakter:İsim], [Araç:İsim], [Org:İsim], [Mülk:İsim] etiketleri kullanılır.',
+      'Bu etiketler oyuncular tarafından ve senin mesajlarında sahne zenginleştirmek için kullanılır.',
+      'SEND_MSG içinde etiket kullanabilirsin: "...[Org:NYPD] yetkilileri...",  "[Araç:Crown Victoria] yanına çekti"',
       '',
       '== AKTİF KARİŞTERLER (char_id gereken mevcut karakterler) ==',
       (S.chars||[]).filter(c=>c.status!=='Deceased').slice(0,30).map(c=>
