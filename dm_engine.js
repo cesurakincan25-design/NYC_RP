@@ -1,17 +1,14 @@
 /**
  * ╔══════════════════════════════════════════════════════════════╗
  * ║  dm_engine.js — Dungeon Master AI Engine                    ║
- * ║  Phase 4 — NYC_RP / TOKYO_RP                                ║
+ * ║  Phase 5 — Firebase Edition                                 ║
  * ║                                                             ║
  * ║  Config-driven: reads window.DM_CONFIG at startup.          ║
  * ║  Drop this file into any RP world — zero code changes.      ║
  * ╚══════════════════════════════════════════════════════════════╝
  *
- * RESPONSIBILITIES:
- *   NPC Voice    — AI plays NPC characters on manual trigger
- *   World Events — AI generates events for admin approval
- *   Dispatch     — AI writes radio/comms for admin approval
- *   Reading      — builds context window every N msgs + manual
+ * BACKEND: Firebase Firestore (messaging + DM tables)
+ *          Firebase AI Logic  (Gemini — no API key in browser)
  *
  * DOES NOT:
  *   Auto-interrupt players
@@ -23,133 +20,186 @@
 
 /* ════════════════════════════════════════════════════════
    CONFIG — lazy getter, reads window.DM_CONFIG at call time
-   so it works regardless of script load order
 ════════════════════════════════════════════════════════ */
 const DM_CFG = new Proxy({}, {
-  get(_, key) {
-    return (window.DM_CONFIG || {})[key];
-  }
+  get(_, key) { return (window.DM_CONFIG || {})[key]; },
 });
 
 const DM = {
-  get SUPA_URL()   { return window.DM_CONFIG?.supaUrl    || ''; },
-  get SUPA_KEY()   { return window.DM_CONFIG?.supaKey    || ''; },
-  get GEM_KEY()    { return window.DM_CONFIG?.geminiKey  || ''; },
-  get GEM_MODEL()  { return window.DM_CONFIG?.geminiModel|| 'gemini-2.5-flash'; },
-  get WORLD()      { return window.DM_CONFIG?.world      || 'nyc'; },
-  get WORLD_NAME() { return window.DM_CONFIG?.worldName  || 'NYC'; },
-  get DB_TABLE()   { return window.DM_CONFIG?.dbTable    || 'nyc_db'; },
-  get OPERATOR()   { return window.DM_CONFIG?.operator   || 'dm'; },
-  get READ_INTERVAL(){ return window.DM_CONFIG?.readInterval || 25; },
-  set OPERATOR(v)  { if(window.DM_CONFIG) window.DM_CONFIG.operator = v; },
+  get GEM_MODEL()        { return window.DM_CONFIG?.geminiModel       || 'gemini-2.5-flash'; },
+  get WORLD()            { return window.DM_CONFIG?.world             || 'nyc'; },
+  get WORLD_NAME()       { return window.DM_CONFIG?.worldName         || 'NYC'; },
+  get DB_TABLE()         { return window.DM_CONFIG?.dbTable           || 'nyc_db'; },
+  get OPERATOR()         { return window.DM_CONFIG?.operator          || 'dm'; },
+  get READ_INTERVAL()    { return window.DM_CONFIG?.readInterval      || 25; },
+  get COLLECTION_PREFIX(){ return window.DM_CONFIG?.collectionPrefix  || ''; },
+  set OPERATOR(v)        { if (window.DM_CONFIG) window.DM_CONFIG.operator = v; },
 
   _msgsSinceRead: 0,
   _worldCache:    null,
   _worldCacheAt:  0,
-  _sessionId:     'main',
 };
 
-
 /* ════════════════════════════════════════════════════════
-   SUPABASE HELPERS (standalone — no dependency on nyc_rp.html DB)
+   FIREBASE HELPERS
 ════════════════════════════════════════════════════════ */
-const DMDB = {
-  _h() {
-    return {
-      'apikey':        DM.SUPA_KEY,
-      'Authorization': 'Bearer ' + DM.SUPA_KEY,
-      'Content-Type':  'application/json',
-      'Prefer':        'return=representation',
-    };
+const DMFB = {
+  _db() {
+    if (!window._fbDb) throw new Error('[DM] Firebase hazır değil (window._fbDb yok)');
+    return window._fbDb;
   },
-  async get(path) {
-    const r = await fetch(`${DM.SUPA_URL}/rest/v1/${path}`, { headers: this._h() });
-    if (!r.ok) throw new Error(`[DMDB] GET ${path} → ${r.status}: ${await r.text()}`);
-    return r.json();
+  _fs() {
+    if (!window._fbFirestore) throw new Error('[DM] Firebase Firestore SDK eksik');
+    return window._fbFirestore;
   },
-  async post(table, body) {
-    const r = await fetch(`${DM.SUPA_URL}/rest/v1/${table}`, {
-      method: 'POST', headers: this._h(), body: JSON.stringify(body),
+  _col(name) {
+    return (DM.COLLECTION_PREFIX || '') + name;
+  },
+
+  async getDoc(colName, docId) {
+    const { doc, getDoc } = this._fs();
+    const snap = await getDoc(doc(this._db(), colName, docId));
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...snap.data() };
+  },
+
+  async getDocs(colName, ...constraints) {
+    const { collection, query, getDocs } = this._fs();
+    const ref = collection(this._db(), colName);
+    const q   = constraints.length ? query(ref, ...constraints) : query(ref);
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  async setDoc(colName, docId, data) {
+    const { doc, setDoc } = this._fs();
+    await setDoc(doc(this._db(), colName, docId), {
+      ...data,
+      created_at: data.created_at || new Date().toISOString(),
     });
-    if (!r.ok) throw new Error(`[DMDB] POST ${table} → ${r.status}: ${await r.text()}`);
-    return r.json();
+    return docId;
   },
-  async patch(table, qs, body) {
-    const r = await fetch(`${DM.SUPA_URL}/rest/v1/${table}?${qs}`, {
-      method: 'PATCH', headers: this._h(), body: JSON.stringify(body),
+
+  async updateDoc(colName, docId, data) {
+    const { doc, updateDoc } = this._fs();
+    await updateDoc(doc(this._db(), colName, docId), {
+      ...data,
+      updated_at: new Date().toISOString(),
     });
-    if (!r.ok) throw new Error(`[DMDB] PATCH ${table} → ${r.status}`);
-    return r.json();
+  },
+
+  async addDoc(colName, data) {
+    const { collection, addDoc } = this._fs();
+    const ref = await addDoc(collection(this._db(), colName), {
+      ...data,
+      created_at: data.created_at || new Date().toISOString(),
+    });
+    return ref.id;
+  },
+
+  /** Post a message into Firebase subcollection rp_rooms/{roomId}/messages */
+  async postRpMessage(roomId, msgData) {
+    const { collection, addDoc } = this._fs();
+    const col = this._col('rp_rooms');
+    const ref = await addDoc(
+      collection(this._db(), col, roomId, 'messages'),
+      { ...msgData, created_at: new Date().toISOString() }
+    );
+    return ref.id;
+  },
+
+  /** Get recent messages from rp_rooms/{roomId}/messages */
+  async getRecentMessages(roomId, lim = 12) {
+    const { collection, query, orderBy, limit, getDocs } = this._fs();
+    const col  = this._col('rp_rooms');
+    const snap = await getDocs(
+      query(
+        collection(this._db(), col, roomId, 'messages'),
+        orderBy('created_at', 'desc'),
+        limit(lim)
+      )
+    );
+    return snap.docs.map(d => ({ id: d.id, ...d.data() })).reverse();
+  },
+
+  increment(n = 1) {
+    return this._fs().increment(n);
+  },
+
+  _incSession(field) {
+    const col = this._col('dm_session');
+    this.updateDoc(col, 'main', { [field]: this.increment(1) }).catch(() => {});
   },
 };
 
-
 /* ════════════════════════════════════════════════════════
-   GEMINI CLIENT — via Supabase Edge Function proxy
-   API key stored as Supabase secret, never exposed to browser
+   GEMINI CLIENT — Firebase AI Logic (no API key in browser)
 ════════════════════════════════════════════════════════ */
 const DMGemini = {
-  _url() {
-    return `${DM.SUPA_URL}/functions/v1/gemini-proxy`;
-  },
   async generate(prompt, opts = {}) {
-    const r = await fetch(this._url(), {
-      method: 'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'apikey':        DM.SUPA_KEY,
-        'Authorization': 'Bearer ' + DM.SUPA_KEY,
-      },
-      body: JSON.stringify({
-        model: DM.GEM_MODEL,
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature:      opts.temperature      ?? 0.75,
-          topP:             opts.topP             ?? 0.9,
-          maxOutputTokens:  opts.maxOutputTokens  ?? 1500,
-          responseMimeType: opts.json ? 'application/json' : 'text/plain',
-        },
-        safetySettings: [
-          { category: 'HARM_CATEGORY_HARASSMENT',        threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_HATE_SPEECH',       threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-        ],
-      }),
-    });
-    if (!r.ok) {
-      const errText = await r.text().catch(() => String(r.status));
-      throw new Error(`Gemini proxy ${r.status}: ${errText}`);
+    // Wait up to 8s for Firebase AI to initialise
+    let waited = 0;
+    while (!window._fbAIReady && waited < 8000) {
+      await new Promise(r => setTimeout(r, 100));
+      waited += 100;
     }
-    const d = await r.json();
-    const text = d?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new Error('Gemini returned empty content');
+    if (!window._fbAIReady || !window._fbGetModel) {
+      throw new Error('[DM] Firebase AI Logic hazır değil');
+    }
+
+    const model  = window._fbGetModel(DM.GEM_MODEL);
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature:      opts.temperature     ?? 0.75,
+        topP:             opts.topP            ?? 0.9,
+        maxOutputTokens:  opts.maxOutputTokens ?? 1500,
+        responseMimeType: opts.json ? 'application/json' : 'text/plain',
+      },
+      safetySettings: [
+        { category: 'HARM_CATEGORY_HARASSMENT',        threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_HATE_SPEECH',       threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+      ],
+    });
+
+    const text = result?.response?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error('[DM] Gemini boş yanıt döndürdü');
+
     if (opts.json) {
-      return JSON.parse(text.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```$/i,'').trim());
+      const cleaned = text
+        .replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+      return JSON.parse(cleaned);
     }
     return text;
   },
 };
 
-
 /* ════════════════════════════════════════════════════════
-   WORLD CONTEXT — loads characters + orgs from main DB
+   WORLD CONTEXT — loads characters + orgs from Firebase
 ════════════════════════════════════════════════════════ */
 const DMWorld = {
-  CACHE_TTL: 60 * 60 * 1000, // 1 hour
+  CACHE_TTL: 60 * 60 * 1000,
 
   async load(force = false) {
     if (!force && DM._worldCache && Date.now() - DM._worldCacheAt < this.CACHE_TTL) {
       return DM._worldCache;
     }
     try {
-      const rows = await DMDB.get(`${DM.DB_TABLE}?id=eq.main&select=data`);
-      if (!rows.length) throw new Error('Main DB row not found');
-      const d = typeof rows[0].data === 'string' ? JSON.parse(rows[0].data) : rows[0].data;
-      DM._worldCache = {
-        characters:    d.characters    || [],
-        organizations: d.organizations || [],
-      };
+      // Primary: use the helper already in nyc_rp.html
+      let d = null;
+      if (typeof window._fbLoadDB === 'function') {
+        d = await window._fbLoadDB(DM.DB_TABLE);
+      }
+      // Fallback: direct Firestore read
+      if (!d) {
+        const row = await DMFB.getDoc(DM.DB_TABLE, 'main');
+        if (!row) throw new Error('Main DB doc not found in Firebase');
+        d = row.data || row;
+      }
+      if (typeof d === 'string') d = JSON.parse(d);
+      DM._worldCache   = { characters: d.characters || [], organizations: d.organizations || [] };
       DM._worldCacheAt = Date.now();
       return DM._worldCache;
     } catch (e) {
@@ -158,36 +208,29 @@ const DMWorld = {
     }
   },
 
-  /** Returns all NPC characters (playerId empty or missing) */
   async getNPCs() {
     const w = await this.load();
-    return w.characters.filter(c =>
-      (!c.playerId || c.playerId === '') &&
-      c.status !== 'Deceased'
-    );
+    return w.characters.filter(c => (!c.playerId || c.playerId === '') && c.status !== 'Deceased');
   },
 
-  /** Returns a specific character by id */
   async getChar(id) {
     const w = await this.load();
     return w.characters.find(c => c.id === id) || null;
   },
 
-  /** Returns org by id */
   async getOrg(id) {
     const w = await this.load();
     return w.organizations.find(o => o.id === id) || null;
   },
 
-  /** Compact roster string for prompt injection */
   async buildRoster() {
     const w = await this.load();
     const npcList = w.characters
       .filter(c => (!c.playerId || c.playerId === '') && c.status !== 'Deceased')
       .map(c => {
-        const orgIds = c.organizations || (c.organization ? [c.organization] : []);
+        const orgIds   = c.organizations || (c.organization ? [c.organization] : []);
         const orgNames = orgIds.map(oid => w.organizations.find(o => o.id === oid)?.name || oid).join(', ');
-        return `• [NPC] ${c.name} [${c.id}] alias="${c.alias || ''}" org="${orgNames}" story="${(c.story || '').slice(0, 120)}"`;
+        return `• [NPC] ${c.name} [${c.id}] alias="${c.alias||''}" org="${orgNames}" story="${(c.story||'').slice(0,120)}"`;
       }).join('\n');
 
     const pcList = w.characters
@@ -197,26 +240,26 @@ const DMWorld = {
         return `• [PC:${pl?.name || c.playerId}] ${c.name} [${c.id}]`;
       }).join('\n');
 
-    const orgList = w.organizations
-      .map(o => `• ${o.name} [${o.id}]`)
-      .join('\n');
+    const orgList = w.organizations.map(o => `• ${o.name} [${o.id}]`).join('\n');
 
-    return `PLAYER CHARACTERS:\n${pcList || '(none)'}\n\nNPC CHARACTERS:\n${npcList || '(none)'}\n\nORGANIZATIONS:\n${orgList || '(none)'}`;
+    return `PLAYER CHARACTERS:\n${pcList||'(none)'}\n\nNPC CHARACTERS:\n${npcList||'(none)'}\n\nORGANIZATIONS:\n${orgList||'(none)'}`;
   },
 };
 
 /* ════════════════════════════════════════════════════════
-   CONTEXT WINDOW — rolling summary of recent RP
+   CONTEXT WINDOW — rolling summary stored in Firebase
+   Collection: dm_session  /  doc: main
 ════════════════════════════════════════════════════════ */
 const DMContext = {
-  _window: [],          // [{ summary, covered_msgs, created_at }]
-  MAX_ENTRIES: 6,       // keep last 6 summaries (~150 messages of context)
+  _window:     [],
+  MAX_ENTRIES: 6,
 
   async load() {
     try {
-      const rows = await DMDB.get('dm_session?id=eq.main&select=context_window,context_msg_count');
-      if (rows.length && rows[0].context_window) {
-        this._window = rows[0].context_window;
+      const col = DMFB._col('dm_session');
+      const row = await DMFB.getDoc(col, 'main');
+      if (row && row.context_window) {
+        this._window      = row.context_window;
         DM._msgsSinceRead = 0;
       }
     } catch (e) { /* first run */ }
@@ -224,7 +267,8 @@ const DMContext = {
 
   async save() {
     try {
-      await DMDB.patch('dm_session', 'id=eq.main', {
+      const col = DMFB._col('dm_session');
+      await DMFB.setDoc(col, 'main', {
         context_window:    this._window,
         context_msg_count: this._window.reduce((s, e) => s + (e.msg_count || 0), 0),
         updated_at:        new Date().toISOString(),
@@ -234,16 +278,13 @@ const DMContext = {
 
   add(entry) {
     this._window.unshift(entry);
-    if (this._window.length > this.MAX_ENTRIES) {
-      this._window = this._window.slice(0, this.MAX_ENTRIES);
-    }
+    if (this._window.length > this.MAX_ENTRIES) this._window = this._window.slice(0, this.MAX_ENTRIES);
   },
 
-  /** Returns a compact string of all summaries for prompt injection */
   toString() {
     if (!this._window.length) return '(No prior context — session just started)';
     return this._window
-      .map((e, i) => `[Context ${i + 1} — ${new Date(e.created_at).toLocaleString()}]\n${e.summary}`)
+      .map((e, i) => `[Context ${i+1} — ${new Date(e.created_at).toLocaleString()}]\n${e.summary}`)
       .join('\n\n---\n\n');
   },
 };
@@ -253,13 +294,13 @@ const DMContext = {
 ════════════════════════════════════════════════════════ */
 const DMPrompts = {
   _base(roster, context) {
-    return `You are the Dungeon Master AI for ${DM.WORLD_NAME} — a ${DM.WORLD === 'nyc' ? 'cyberpunk crime-noir New York City' : 'cyberpunk neo-noir Tokyo'} roleplay universe.
+    return `You are the Dungeon Master AI for ${DM.WORLD_NAME} — a ${DM.WORLD==='nyc'?'cyberpunk crime-noir New York City':'cyberpunk neo-noir Tokyo'} roleplay universe.
 
 WORLD: ${DM.WORLD_NAME}
 YOUR ROLE: DM AI — you control NPC characters, generate world events, and write dispatch communications.
 
 RULES:
-- Stay true to the world's tone: ${DM.WORLD === 'nyc' ? 'gritty, noir, urban crime, corporate power, street gangs' : 'neon-lit, yakuza, corporate dystopia, tradition vs technology'}
+- Stay true to the world's tone: ${DM.WORLD==='nyc'?'gritty, noir, urban crime, corporate power, street gangs':'neon-lit, yakuza, corporate dystopia, tradition vs technology'}
 - NPCs must speak/act consistent with their story, organization, and relationships
 - Never break character. Never reference being an AI.
 - Keep dialogue realistic and concise — RP style, not novel-writing
@@ -271,37 +312,35 @@ RECENT SESSION CONTEXT:
 ${context}`;
   },
 
-  /* ── NPC Voice prompt ─────────────────────────────────── */
-  npcVoice(npcChar, triggerMsgs, roster, context, instruction = '') {
+  npcVoice(npcChar, triggerMsgs, roster, context, instruction='') {
     const orgIds = npcChar.organizations || (npcChar.organization ? [npcChar.organization] : []);
     return `${this._base(roster, context)}
 
 ---
 YOU ARE NOW PLAYING: ${npcChar.name}
 Character ID: ${npcChar.id}
-Alias: ${npcChar.alias || 'None'}
-Organizations: ${orgIds.join(', ') || 'None'}
-Story: ${npcChar.story || 'Unknown background'}
-${npcChar.reputation ? `Reputation: ${JSON.stringify(npcChar.reputation)}` : ''}
+Alias: ${npcChar.alias||'None'}
+Organizations: ${orgIds.join(', ')||'None'}
+Story: ${npcChar.story||'Unknown background'}
+${npcChar.reputation?`Reputation: ${JSON.stringify(npcChar.reputation)}`:''}
 
 RECENT MESSAGES (what just happened in the scene):
-${triggerMsgs.map(m => `[${m.char_name}${m.org_name ? ' ['+m.org_name+']' : ''}]: ${m.content}`).join('\n')}
+${triggerMsgs.map(m=>`[${m.char_name}${m.org_name?' ['+m.org_name+']':''}]: ${m.content}`).join('\n')}
 
-${instruction ? `OPERATOR INSTRUCTION: ${instruction}` : 'Respond naturally as this character based on the recent scene.'}
+${instruction?`OPERATOR INSTRUCTION: ${instruction}`:'Respond naturally as this character based on the recent scene.'}
 
 Write ONLY the character's response. No narration wrapper. No quotation marks around the whole thing.
 Format: If it's dialogue, just write what they say. If it's an action, wrap in [brackets].
 Keep it 1-4 sentences unless the situation demands more.`;
   },
 
-  /* ── World Event prompt ───────────────────────────────── */
-  worldEvent(triggerType, context, roster, extraInstruction = '') {
+  worldEvent(triggerType, context, roster, extraInstruction='') {
     return `${this._base(roster, context)}
 
 ---
 TASK: Generate a world event for the ${DM.WORLD_NAME} setting.
 Trigger type: ${triggerType}
-${extraInstruction ? `Operator guidance: ${extraInstruction}` : ''}
+${extraInstruction?`Operator guidance: ${extraInstruction}`:''}
 
 Create a believable, tension-building event that:
 - Fits naturally into current RP context
@@ -316,24 +355,23 @@ Respond ONLY with valid JSON (no markdown):
   "severity": "low|medium|high|critical",
   "description": "2-3 sentence event description in world tone",
   "consequences": "what changes as a result (1-2 sentences)",
-  "affected_orgs": ["org_id_1", "org_id_2"],
+  "affected_orgs": ["org_id_1"],
   "affected_chars": ["char_id_1"],
   "location_hint": "district or location name if relevant"
 }`;
   },
 
-  /* ── Dispatch prompt ──────────────────────────────────── */
-  dispatch(org, callType, context, roster, incident = '', extraInstruction = '') {
+  dispatch(org, callType, context, roster, incident='', extraInstruction='') {
     return `${this._base(roster, context)}
 
 ---
 TASK: Write a radio/comms dispatch message.
-Dispatching organization: ${org?.name || callType}
+Dispatching organization: ${org?.name||callType}
 Call type: ${callType}
-${incident ? `Related incident: ${incident}` : ''}
-${extraInstruction ? `Operator guidance: ${extraInstruction}` : ''}
+${incident?`Related incident: ${incident}`:''}
+${extraInstruction?`Operator guidance: ${extraInstruction}`:''}
 
-Write a realistic dispatch message in the style of ${DM.WORLD === 'nyc' ? 'NYPD/crime org radio chatter' : 'Tokyo PD/yakuza comms'}.
+Write a realistic dispatch message in the style of ${DM.WORLD==='nyc'?'NYPD/crime org radio chatter':'Tokyo PD/yakuza comms'}.
 Include a call code, location if relevant, and keep it terse — dispatchers don't monologue.
 
 Respond ONLY with valid JSON:
@@ -346,18 +384,16 @@ Respond ONLY with valid JSON:
 }`;
   },
 
-  /* ── Reading / Context Build prompt ──────────────────── */
   buildContext(messages, existingContext) {
     const transcript = messages
-      .map(m => `[${m.char_name}${m.org_name ? ' [' + m.org_name + ']' : ''}]: ${m.content}`)
+      .map(m=>`[${m.char_name}${m.org_name?' ['+m.org_name+']':''}]: ${m.content}`)
       .join('\n');
-
     return `You are the DM AI for ${DM.WORLD_NAME}. Build a compact context summary of the following RP session transcript.
 
 This summary will be added to your context window to inform future NPC decisions and world events.
 
 EXISTING CONTEXT SUMMARY:
-${existingContext || '(none yet)'}
+${existingContext||'(none yet)'}
 
 NEW TRANSCRIPT (${messages.length} messages):
 ${transcript}
@@ -371,7 +407,6 @@ Write a concise 3-5 sentence summary covering:
 Be factual and RP-specific. No meta-commentary. Write in present tense.`;
   },
 
-  /* ── Instant NPC Creation prompt ─────────────────────── */
   createNPC(description, context, roster) {
     return `${this._base(roster, context)}
 
@@ -397,150 +432,102 @@ Respond ONLY with valid JSON:
 };
 
 /* ════════════════════════════════════════════════════════
-   NPC ENGINE — core NPC voice system
+   NPC ENGINE
 ════════════════════════════════════════════════════════ */
 const DMNpc = {
-  /** Get recent messages from a room for context */
-  async _getRecentMsgs(roomId, limit = 12) {
-    try {
-      return await DMDB.get(
-        `rp_messages?room_id=eq.${roomId}&is_deleted=eq.false&order=created_at.desc&limit=${limit}&select=id,char_name,org_name,content,char_id,created_at`
-      ).then(r => r.reverse());
-    } catch (e) { return []; }
-  },
-
-  /**
-   * Trigger an NPC to speak/act.
-   * @param {string} charId - character id from main DB
-   * @param {string} roomId - which room to send to
-   * @param {string} instruction - optional operator instruction ("act suspicious", "reveal the deal")
-   * @param {string} operatorId - who triggered this
-   */
-  async trigger(charId, roomId, instruction = '', operatorId = '') {
+  async trigger(charId, roomId, instruction='', operatorId='') {
     const [npcChar, roster, recentMsgs] = await Promise.all([
       DMWorld.getChar(charId),
       DMWorld.buildRoster(),
-      this._getRecentMsgs(roomId, 12),
+      DMFB.getRecentMessages(roomId, 12),
     ]);
 
-    if (!npcChar) throw new Error(`Character ${charId} not found`);
-    if (npcChar.playerId) throw new Error(`${npcChar.name} is a player character — cannot be played by DM`);
+    if (!npcChar)       throw new Error(`Character ${charId} not found`);
+    if (npcChar.playerId) throw new Error(`${npcChar.name} is a PC — cannot be played by DM`);
 
-    const prompt = DMPrompts.npcVoice(npcChar, recentMsgs, roster, DMContext.toString(), instruction);
+    const prompt   = DMPrompts.npcVoice(npcChar, recentMsgs, roster, DMContext.toString(), instruction);
     const response = await DMGemini.generate(prompt, { temperature: 0.82 });
 
-    // Post as rp_message
-    const orgIds = npcChar.organizations || (npcChar.organization ? [npcChar.organization] : []);
+    const orgIds  = npcChar.organizations || (npcChar.organization ? [npcChar.organization] : []);
     const orgData = orgIds.length ? await DMWorld.getOrg(orgIds[0]) : null;
 
-    const msgRows = await DMDB.post('rp_messages', {
-      room_id:     roomId,
-      char_id:     npcChar.id,
-      char_name:   npcChar.name,
-      char_alias:  npcChar.alias || '',
-      char_avatar: npcChar.image || '',
-      org_id:      orgData?.id   || null,
-      org_name:    orgData?.name || null,
-      org_color:   orgData?.color || null,
-      content:     response.trim(),
-      reactions:   {},
-      is_edited:   false,
+    // ─ Post to Firebase subcollection ─
+    const msgId = await DMFB.postRpMessage(roomId, {
+      char_id:      npcChar.id,
+      char_name:    npcChar.name,
+      char_alias:   npcChar.alias   || '',
+      char_avatar:  npcChar.image   || '',
+      org_id:       orgData?.id     || null,
+      org_name:     orgData?.name   || null,
+      org_color:    orgData?.color  || null,
+      content:      response.trim(),
+      reactions:    {},
+      is_edited:    false,
+      is_deleted:   false,
       sent_by_user: `DM:${operatorId || DM.OPERATOR}`,
     });
 
-    const rp_msg_id = msgRows[0]?.id || null;
+    // Log
+    DMFB.addDoc(DMFB._col('dm_npc_messages'), {
+      npc_char_id:    npcChar.id,
+      npc_char_name:  npcChar.name,
+      content:        response.trim(),
+      message_type:   'dialogue',
+      room_id:        roomId,
+      rp_message_id:  msgId,
+      trigger_msg_id: recentMsgs.length ? recentMsgs[recentMsgs.length-1].id : null,
+      model_used:     DM.GEM_MODEL,
+      operator_id:    operatorId || DM.OPERATOR,
+    }).catch(()=>{});
 
-    // Log to dm_npc_messages
-    await DMDB.post('dm_npc_messages', {
-      npc_char_id:   npcChar.id,
-      npc_char_name: npcChar.name,
-      content:       response.trim(),
-      message_type:  'dialogue',
-      room_id:       roomId,
-      rp_message_id: rp_msg_id,
-      trigger_msg_id: recentMsgs.length ? recentMsgs[recentMsgs.length - 1].id : null,
-      model_used:    DM.GEM_MODEL,
-      operator_id:   operatorId || DM.OPERATOR,
-    }).catch(() => {});
-
-    // Update session stats
-    DMDB.patch('dm_session', 'id=eq.main', {
-      npc_messages_sent: { increment: 1 },
-      updated_at: new Date().toISOString(),
-    }).catch(() => {});
-
-    return { content: response.trim(), char: npcChar, rp_msg_id };
+    DMFB._incSession('npc_messages_sent');
+    return { content: response.trim(), char: npcChar, rp_msg_id: msgId };
   },
 
-  /**
-   * Create a brand-new NPC instantly and have them appear in the scene.
-   * @param {string} description - operator's plain-text description
-   * @param {string} roomId
-   * @param {string} operatorId
-   */
-  async createAndTrigger(description, roomId, operatorId = '') {
+  async createAndTrigger(description, roomId, operatorId='') {
     const [roster, recentMsgs] = await Promise.all([
       DMWorld.buildRoster(),
-      this._getRecentMsgs(roomId, 8),
+      DMFB.getRecentMessages(roomId, 8),
     ]);
 
-    // Generate NPC profile
     const npcData = await DMGemini.generate(
       DMPrompts.createNPC(description, DMContext.toString(), roster),
       { json: true, temperature: 0.85 }
     );
 
-    // Build a temp ID
-    const tmpId = 'npc_' + DM.WORLD + '_' + Date.now();
+    const tmpId   = 'npc_' + DM.WORLD + '_' + Date.now();
     const newChar = {
-      id:          tmpId,
-      name:        npcData.name,
-      alias:       npcData.alias || '',
-      story:       npcData.story || '',
-      organizations: [],
-      playerId:    '',
-      status:      'Active',
-      threatLevel: npcData.threatLevel || 'Low',
-      heatLevel:   npcData.heatLevel   || 'Clean',
-      image:       '',
+      id: tmpId, name: npcData.name, alias: npcData.alias||'',
+      story: npcData.story||'', organizations: [], playerId: '',
+      status: 'Active', threatLevel: npcData.threatLevel||'Low',
+      heatLevel: npcData.heatLevel||'Clean', image: '',
     };
 
-    // Optionally save to main DB (adds to character list)
+    // Save new char into main DB doc
     if (DM_CFG.saveInstantNPCs !== false) {
       try {
-        const mainRows = await DMDB.get(`${DM.DB_TABLE}?id=eq.main&select=data`);
-        if (mainRows.length) {
-          const mainData = typeof mainRows[0].data === 'string'
-            ? JSON.parse(mainRows[0].data) : mainRows[0].data;
+        let mainData = await window._fbLoadDB?.(DM.DB_TABLE);
+        if (!mainData) {
+          const row = await DMFB.getDoc(DM.DB_TABLE, 'main');
+          mainData = row?.data || row;
+        }
+        if (typeof mainData === 'string') mainData = JSON.parse(mainData);
+        if (mainData) {
           mainData.characters = mainData.characters || [];
           mainData.characters.push(newChar);
-          await DMDB.patch(DM.DB_TABLE, 'id=eq.main', {
-            data: mainData,
-            updated_by: `DM:${operatorId}`,
-            updated_at: new Date().toISOString(),
+          await DMFB.setDoc(DM.DB_TABLE, 'main', {
+            data: mainData, updated_by: `DM:${operatorId}`,
           });
-          // Invalidate world cache
           DM._worldCache = null;
         }
-      } catch (e) {
-        console.warn('[DM] Could not save instant NPC to DB:', e.message);
-      }
+      } catch (e) { console.warn('[DM] Could not save instant NPC:', e.message); }
     }
 
-    // Post opening line as rp_message
     const opening = npcData.opening_line || `*${newChar.name} enters the scene*`;
-    await DMDB.post('rp_messages', {
-      room_id:      roomId,
-      char_id:      tmpId,
-      char_name:    newChar.name,
-      char_alias:   newChar.alias,
-      char_avatar:  '',
-      org_id:       null,
-      org_name:     null,
-      org_color:    null,
-      content:      opening,
-      reactions:    {},
-      is_edited:    false,
+    await DMFB.postRpMessage(roomId, {
+      char_id: tmpId, char_name: newChar.name, char_alias: newChar.alias,
+      char_avatar: '', org_id: null, org_name: null, org_color: null,
+      content: opening, reactions: {}, is_edited: false, is_deleted: false,
       sent_by_user: `DM:${operatorId || DM.OPERATOR}`,
     });
 
@@ -549,66 +536,38 @@ const DMNpc = {
 };
 
 /* ════════════════════════════════════════════════════════
-   READING ENGINE — context window builder
+   READING ENGINE
 ════════════════════════════════════════════════════════ */
 const DMReader = {
   _reading: false,
 
-  /** Called by the RP client whenever a new message arrives */
   onMessage() {
     DM._msgsSinceRead++;
-    if (DM._msgsSinceRead >= DM.READ_INTERVAL) {
-      this.read('auto');
-    }
+    if (DM._msgsSinceRead >= DM.READ_INTERVAL) this.read('auto');
   },
 
-  /**
-   * Read recent messages and update context window.
-   * @param {string} reason - 'auto' | 'manual'
-   * @param {string} roomId - optional, reads from active room
-   */
-  async read(reason = 'manual', roomId = null) {
+  async read(reason='manual', roomId=null) {
     if (this._reading) return;
-    this._reading = true;
+    this._reading     = true;
     DM._msgsSinceRead = 0;
-
     try {
       const targetRoom = roomId || DM_CFG.activeRoomId;
       if (!targetRoom) { this._reading = false; return; }
 
-      // Get last N messages
-      const msgs = await DMDB.get(
-        `rp_messages?room_id=eq.${targetRoom}&is_deleted=eq.false&order=created_at.desc&limit=30&select=id,char_name,org_name,content,created_at`
-      ).then(r => r.reverse());
-
+      const msgs = await DMFB.getRecentMessages(targetRoom, 30);
       if (!msgs.length) { this._reading = false; return; }
 
-      // Build summary
       const summary = await DMGemini.generate(
         DMPrompts.buildContext(msgs, DMContext.toString()),
         { temperature: 0.3, maxOutputTokens: 600 }
       );
 
-      // Add to context window
-      DMContext.add({
-        summary,
-        msg_count: msgs.length,
-        room_id:   targetRoom,
-        reason,
-        created_at: new Date().toISOString(),
-      });
-
+      DMContext.add({ summary, msg_count: msgs.length, room_id: targetRoom, reason, created_at: new Date().toISOString() });
       await DMContext.save();
+      DMFB._incSession('manual_reads');
 
-      // Update session stats
-      DMDB.patch('dm_session', 'id=eq.main', {
-        manual_reads: { increment: 1 },
-        updated_at: new Date().toISOString(),
-      }).catch(() => {});
-
-      console.log(`[DM] Context updated (${reason}): ${msgs.length} messages summarized`);
+      console.log(`[DM] Context updated (${reason}): ${msgs.length} msgs`);
       if (typeof DMEvents !== 'undefined') DMEvents.emit('context_updated', { reason, summary });
-
     } catch (e) {
       console.error('[DM] Read failed:', e);
     } finally {
@@ -618,215 +577,127 @@ const DMReader = {
 };
 
 /* ════════════════════════════════════════════════════════
-   WORLD EVENT ENGINE
+   WORLD EVENT ENGINE — Firebase dm_world_events
 ════════════════════════════════════════════════════════ */
 const DMWorldEvent = {
-  /**
-   * Generate a world event for admin review.
-   * @param {string} triggerType - 'manual' | 'faction_tension' | 'incident'
-   * @param {string} instruction - operator guidance
-   * @param {string} operatorId
-   */
-  async generate(triggerType = 'manual', instruction = '', operatorId = '') {
-    const roster = await DMWorld.buildRoster();
+  async generate(triggerType='manual', instruction='', operatorId='') {
+    const roster    = await DMWorld.buildRoster();
     const eventData = await DMGemini.generate(
       DMPrompts.worldEvent(triggerType, DMContext.toString(), roster, instruction),
       { json: true, temperature: 0.78 }
     );
-
-    // Save to dm_world_events (pending admin review)
-    const rows = await DMDB.post('dm_world_events', {
-      title:          eventData.title,
-      event_type:     eventData.event_type || 'tension',
-      severity:       eventData.severity   || 'medium',
-      description:    eventData.description,
-      consequences:   eventData.consequences || '',
-      affected_orgs:  eventData.affected_orgs || [],
-      affected_chars: eventData.affected_chars || [],
-      location_hint:  eventData.location_hint || '',
-      generated_from: triggerType,
-      model_used:     DM.GEM_MODEL,
-      operator_id:    operatorId || DM.OPERATOR,
-      prompt_summary: instruction,
-      status:         'pending',
+    const col = DMFB._col('dm_world_events');
+    const id  = await DMFB.addDoc(col, {
+      title: eventData.title, event_type: eventData.event_type||'tension',
+      severity: eventData.severity||'medium', description: eventData.description,
+      consequences: eventData.consequences||'', affected_orgs: eventData.affected_orgs||[],
+      affected_chars: eventData.affected_chars||[], location_hint: eventData.location_hint||'',
+      generated_from: triggerType, model_used: DM.GEM_MODEL,
+      operator_id: operatorId||DM.OPERATOR, prompt_summary: instruction, status: 'pending',
     });
-
-    DMDB.patch('dm_session', 'id=eq.main', {
-      world_events_gen: { increment: 1 },
-      updated_at: new Date().toISOString(),
-    }).catch(() => {});
-
-    return { ...eventData, id: rows[0]?.id };
+    DMFB._incSession('world_events_gen');
+    return { ...eventData, id };
   },
 
-  /**
-   * Admin approves a pending event → fires it into world_events table.
-   */
-  async approve(dmEventId, operatorId = '') {
-    const rows = await DMDB.get(`dm_world_events?id=eq.${dmEventId}&select=*`);
-    if (!rows.length) throw new Error('Event not found');
-    const ev = rows[0];
-
-    // Write to actual world_events table
-    const weRows = await DMDB.post('world_events', {
-      title:            ev.title,
-      event_type:       ev.event_type,
-      severity:         ev.severity,
-      status:           'active',
-      scope:            'local',
-      description:      ev.description,
-      consequences:     ev.consequences,
-      factions:         ev.affected_orgs,
-      linked_characters:ev.affected_chars,
-      event_date:       new Date().toISOString(),
-      is_public:        true,
-      source:           'ai_agent',
-      created_by:       `DM:${operatorId}`,
+  async approve(dmEventId, operatorId='') {
+    const col = DMFB._col('dm_world_events');
+    const ev  = await DMFB.getDoc(col, dmEventId);
+    if (!ev) throw new Error('Event not found');
+    const weId = await DMFB.addDoc(DMFB._col('world_events'), {
+      title: ev.title, event_type: ev.event_type, severity: ev.severity,
+      status: 'active', scope: 'local', description: ev.description,
+      consequences: ev.consequences, factions: ev.affected_orgs,
+      linked_characters: ev.affected_chars, event_date: new Date().toISOString(),
+      is_public: true, source: 'ai_agent', created_by: `DM:${operatorId}`,
     });
-
-    const weId = weRows[0]?.id;
-
-    // Update dm_world_events status
-    await DMDB.patch('dm_world_events', `id=eq.${dmEventId}`, {
-      status:         'fired',
-      reviewed_by:    operatorId,
-      reviewed_at:    new Date().toISOString(),
-      world_event_id: weId,
+    await DMFB.updateDoc(col, dmEventId, {
+      status: 'fired', reviewed_by: operatorId,
+      reviewed_at: new Date().toISOString(), world_event_id: weId,
     });
-
     return { worldEventId: weId, event: ev };
   },
 
-  async reject(dmEventId, operatorId = '', note = '') {
-    await DMDB.patch('dm_world_events', `id=eq.${dmEventId}`, {
-      status:      'rejected',
-      reviewed_by: operatorId,
-      review_note: note,
-      reviewed_at: new Date().toISOString(),
+  async reject(dmEventId, operatorId='', note='') {
+    const col = DMFB._col('dm_world_events');
+    await DMFB.updateDoc(col, dmEventId, {
+      status: 'rejected', reviewed_by: operatorId,
+      review_note: note, reviewed_at: new Date().toISOString(),
     });
   },
 };
 
 /* ════════════════════════════════════════════════════════
-   DISPATCH ENGINE
+   DISPATCH ENGINE — Firebase dm_dispatch_queue
 ════════════════════════════════════════════════════════ */
 const DMDispatch = {
-  /**
-   * Generate a dispatch message for admin review.
-   * @param {string} orgId - which org dispatches (can be null for generic)
-   * @param {string} callType - 'nypd'|'faction'|'system' etc
-   * @param {string} incident - brief incident description
-   * @param {string} instruction - operator guidance
-   * @param {string} operatorId
-   */
-  async generate(orgId = '', callType = 'system', incident = '', instruction = '', operatorId = '') {
+  async generate(orgId='', callType='system', incident='', instruction='', operatorId='') {
     const [org, roster] = await Promise.all([
       orgId ? DMWorld.getOrg(orgId) : Promise.resolve(null),
       DMWorld.buildRoster(),
     ]);
-
     const dispData = await DMGemini.generate(
       DMPrompts.dispatch(org, callType, DMContext.toString(), roster, incident, instruction),
       { json: true, temperature: 0.65 }
     );
-
-    const rows = await DMDB.post('dm_dispatch_queue', {
-      call_type:    callType,
-      call_code:    dispData.call_code || '',
-      org_id:       orgId || '',
-      org_name:     org?.name || callType,
-      title:        dispData.title,
-      message:      dispData.message,
-      location_name:dispData.location_name || '',
-      severity:     dispData.severity || 'medium',
-      triggered_by: incident ? 'incident' : 'manual',
-      operator_id:  operatorId || DM.OPERATOR,
-      model_used:   DM.GEM_MODEL,
-      status:       'pending',
+    const col = DMFB._col('dm_dispatch_queue');
+    const id  = await DMFB.addDoc(col, {
+      call_type: callType, call_code: dispData.call_code||'',
+      org_id: orgId||'', org_name: org?.name||callType,
+      title: dispData.title, message: dispData.message,
+      location_name: dispData.location_name||'', severity: dispData.severity||'medium',
+      triggered_by: incident?'incident':'manual', operator_id: operatorId||DM.OPERATOR,
+      model_used: DM.GEM_MODEL, status: 'pending',
     });
-
-    DMDB.patch('dm_session', 'id=eq.main', {
-      dispatches_gen: { increment: 1 },
-      updated_at: new Date().toISOString(),
-    }).catch(() => {});
-
-    return { ...dispData, id: rows[0]?.id };
+    DMFB._incSession('dispatches_gen');
+    return { ...dispData, id };
   },
 
-  /**
-   * Admin approves dispatch → fires to dispatch_calls + broadcasts to Live room.
-   */
-  async approve(dmDispId, roomId, operatorId = '') {
-    const rows = await DMDB.get(`dm_dispatch_queue?id=eq.${dmDispId}&select=*`);
-    if (!rows.length) throw new Error('Dispatch not found');
-    const dq = rows[0];
+  async approve(dmDispId, roomId, operatorId='') {
+    const col = DMFB._col('dm_dispatch_queue');
+    const dq  = await DMFB.getDoc(col, dmDispId);
+    if (!dq) throw new Error('Dispatch not found');
 
-    // Write to dispatch_calls
-    const dcRows = await DMDB.post('dispatch_calls', {
-      call_type:    dq.call_type,
-      call_code:    dq.call_code,
-      severity:     dq.severity,
-      status:       'active',
-      title:        dq.title,
-      message:      dq.message,
-      location_name:dq.location_name,
-      responding_org: dq.org_id,
-      is_public:    true,
-      source:       'ai_agent',
-      created_by:   `DM:${operatorId}`,
+    const dcId = await DMFB.addDoc(DMFB._col('dispatch_calls'), {
+      call_type: dq.call_type, call_code: dq.call_code, severity: dq.severity,
+      status: 'active', title: dq.title, message: dq.message,
+      location_name: dq.location_name, responding_org: dq.org_id,
+      is_public: true, source: 'ai_agent', created_by: `DM:${operatorId}`,
     });
-    const dcId = dcRows[0]?.id;
 
-    // Format as RP message in the target room (dispatch style)
-    const dispMsg = `📡 **${dq.call_code ? '['+dq.call_code+'] ' : ''}${dq.org_name || 'DISPATCH'}**\n${dq.message}${dq.location_name ? '\n📍 ' + dq.location_name : ''}`;
-
-    const msgRows = await DMDB.post('rp_messages', {
-      room_id:      roomId,
-      char_id:      'system_dispatch',
-      char_name:    dq.org_name || 'DISPATCH',
-      char_alias:   dq.call_code || '',
-      char_avatar:  '',
-      org_id:       dq.org_id   || null,
-      org_name:     dq.org_name || null,
-      org_color:    null,
-      content:      dispMsg,
-      reactions:    {},
-      is_edited:    false,
+    const dispMsg = `📡 **${dq.call_code?'['+dq.call_code+'] ':''}${dq.org_name||'DISPATCH'}**\n${dq.message}${dq.location_name?'\n📍 '+dq.location_name:''}`;
+    const msgId = await DMFB.postRpMessage(roomId, {
+      char_id: 'system_dispatch', char_name: dq.org_name||'DISPATCH',
+      char_alias: dq.call_code||'', char_avatar: '',
+      org_id: dq.org_id||null, org_name: dq.org_name||null, org_color: null,
+      content: dispMsg, reactions: {}, is_edited: false, is_deleted: false,
       sent_by_user: `DM:${operatorId}`,
     });
 
-    const msgId = msgRows[0]?.id;
-
-    // Update queue
-    await DMDB.patch('dm_dispatch_queue', `id=eq.${dmDispId}`, {
-      status:           'broadcast',
-      reviewed_by:      operatorId,
-      reviewed_at:      new Date().toISOString(),
-      dispatch_call_id: dcId,
-      broadcast_msg_id: msgId,
+    await DMFB.updateDoc(col, dmDispId, {
+      status: 'broadcast', reviewed_by: operatorId,
+      reviewed_at: new Date().toISOString(),
+      dispatch_call_id: dcId, broadcast_msg_id: msgId,
     });
-
     return { dispatch_call_id: dcId, rp_msg_id: msgId, data: dq };
   },
 
-  async reject(dmDispId, operatorId = '', note = '') {
-    await DMDB.patch('dm_dispatch_queue', `id=eq.${dmDispId}`, {
-      status:      'rejected',
-      reviewed_by: operatorId,
-      review_note: note,
-      reviewed_at: new Date().toISOString(),
+  async reject(dmDispId, operatorId='', note='') {
+    const col = DMFB._col('dm_dispatch_queue');
+    await DMFB.updateDoc(col, dmDispId, {
+      status: 'rejected', reviewed_by: operatorId,
+      review_note: note, reviewed_at: new Date().toISOString(),
     });
   },
 };
 
 /* ════════════════════════════════════════════════════════
-   SIMPLE EVENT BUS — lets UI hook into DM events
+   SIMPLE EVENT BUS
 ════════════════════════════════════════════════════════ */
 const DMEvents = {
   _handlers: {},
-  on(event, fn) { (this._handlers[event] = this._handlers[event] || []).push(fn); },
-  off(event, fn) { this._handlers[event] = (this._handlers[event] || []).filter(h => h !== fn); },
-  emit(event, data) { (this._handlers[event] || []).forEach(fn => { try { fn(data); } catch(e) {} }); },
+  on(event, fn)    { (this._handlers[event] = this._handlers[event]||[]).push(fn); },
+  off(event, fn)   { this._handlers[event] = (this._handlers[event]||[]).filter(h=>h!==fn); },
+  emit(event, data){ (this._handlers[event]||[]).forEach(fn=>{ try{fn(data);}catch(e){} }); },
 };
 
 /* ════════════════════════════════════════════════════════
@@ -835,51 +706,42 @@ const DMEvents = {
 const DMInit = {
   async start() {
     console.log(`[DM] Initializing for world: ${DM.WORLD_NAME}`);
-    await Promise.all([
-      DMWorld.load(true),
-      DMContext.load(),
-    ]);
-    console.log(`[DM] Ready. NPCs available:`, (await DMWorld.getNPCs()).length);
+    // Wait for Firebase Firestore
+    let waited = 0;
+    while (!window._fbDb && waited < 8000) {
+      await new Promise(r => setTimeout(r, 100));
+      waited += 100;
+    }
+    if (!window._fbDb) throw new Error('[DM] Firebase Firestore hazır değil');
+
+    await Promise.all([ DMWorld.load(true), DMContext.load() ]);
+    const npcs = await DMWorld.getNPCs();
+    console.log(`[DM] Ready. NPCs: ${npcs.length}`);
     DMEvents.emit('ready', { world: DM.WORLD, worldName: DM.WORLD_NAME });
   },
 };
 
 /* ════════════════════════════════════════════════════════
-   PUBLIC API — exposed as window.DMEngine
+   PUBLIC API — window.DMEngine
 ════════════════════════════════════════════════════════ */
 window.DMEngine = {
-  // Init
-  start:        () => DMInit.start(),
-
-  // NPC
-  npcTrigger:   (charId, roomId, instruction, operatorId) => DMNpc.trigger(charId, roomId, instruction, operatorId),
-  npcCreate:    (description, roomId, operatorId)          => DMNpc.createAndTrigger(description, roomId, operatorId),
-  npcList:      ()                                         => DMWorld.getNPCs(),
-
-  // Reading
-  onMessage:    ()                                         => DMReader.onMessage(),
-  readNow:      (roomId)                                   => DMReader.read('manual', roomId),
-  getContext:   ()                                         => DMContext.toString(),
-
-  // World Events
-  generateEvent:(type, instruction, operatorId)            => DMWorldEvent.generate(type, instruction, operatorId),
-  approveEvent: (id, operatorId)                           => DMWorldEvent.approve(id, operatorId),
-  rejectEvent:  (id, operatorId, note)                     => DMWorldEvent.reject(id, operatorId, note),
-
-  // Dispatch
-  generateDispatch: (orgId, callType, incident, instruction, operatorId) => DMDispatch.generate(orgId, callType, incident, instruction, operatorId),
-  approveDispatch:  (id, roomId, operatorId)               => DMDispatch.approve(id, roomId, operatorId),
-  rejectDispatch:   (id, operatorId, note)                 => DMDispatch.reject(id, operatorId, note),
-
-  // World data
-  getWorld:     ()                                         => DMWorld.load(),
-  refreshWorld: ()                                         => DMWorld.load(true),
-
-  // Events
-  on:           (event, fn)                                => DMEvents.on(event, fn),
-  off:          (event, fn)                                => DMEvents.off(event, fn),
-
-  // Config
-  setOperator:  (id)                                       => { DM.OPERATOR = id; },
-  setRoomId:    (id)                                       => { DM_CFG.activeRoomId = id; },
+  start:            ()                                                           => DMInit.start(),
+  npcTrigger:       (charId, roomId, instruction, operatorId)                   => DMNpc.trigger(charId, roomId, instruction, operatorId),
+  npcCreate:        (description, roomId, operatorId)                           => DMNpc.createAndTrigger(description, roomId, operatorId),
+  npcList:          ()                                                           => DMWorld.getNPCs(),
+  onMessage:        ()                                                           => DMReader.onMessage(),
+  readNow:          (roomId)                                                     => DMReader.read('manual', roomId),
+  getContext:       ()                                                           => DMContext.toString(),
+  generateEvent:    (type, instruction, operatorId)                              => DMWorldEvent.generate(type, instruction, operatorId),
+  approveEvent:     (id, operatorId)                                             => DMWorldEvent.approve(id, operatorId),
+  rejectEvent:      (id, operatorId, note)                                       => DMWorldEvent.reject(id, operatorId, note),
+  generateDispatch: (orgId, callType, incident, instruction, operatorId)         => DMDispatch.generate(orgId, callType, incident, instruction, operatorId),
+  approveDispatch:  (id, roomId, operatorId)                                     => DMDispatch.approve(id, roomId, operatorId),
+  rejectDispatch:   (id, operatorId, note)                                       => DMDispatch.reject(id, operatorId, note),
+  getWorld:         ()                                                           => DMWorld.load(),
+  refreshWorld:     ()                                                           => DMWorld.load(true),
+  on:               (event, fn)                                                  => DMEvents.on(event, fn),
+  off:              (event, fn)                                                  => DMEvents.off(event, fn),
+  setOperator:      (id)                                                         => { DM.OPERATOR = id; },
+  setRoomId:        (id)                                                         => { DM_CFG.activeRoomId = id; },
 };
