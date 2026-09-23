@@ -528,7 +528,7 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
         <button class="ma-sb-qbtn" onclick="MASidebar.quick('Mevcut RP durumunu özetle.')">📋 Durum</button>
         <button class="ma-sb-qbtn" onclick="MASidebar.quick('Observer AI birikmiş mesajlarını hemen işle. FLUSH_OAI')">⚡ OAI</button>
         <button class="ma-sb-qbtn" onclick="MASidebar.quick('DM bağlamını güncelle. READ_DM')">📖 DM</button>
-        <button class="ma-sb-qbtn" onclick="MASidebar.quick('Sahneye uygun bir dispatch öner. GEN_EVENT')">🌐 Olay</button>
+        <button class="ma-sb-qbtn" onclick="MASidebar.quick('Şu anki RP ortamına uygun küçük bir sokak olayı yarat ve ilgili karakterleri oynayarak sahneye yaz (SEND_MSG kullan).')">🌐 Olay</button>
         <button class="ma-sb-qbtn" onclick="MASidebar.setupAct()">⏰ Setup At</button>
       </div>
       <!-- Input -->
@@ -3447,7 +3447,7 @@ Login._start=async function(u){
       <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Mevcut RP durumunu özetle.')"><i class="fas fa-clipboard-list"></i> Durum Özeti</button>
       <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Observer AI birikmiş mesajlarını hemen işle ve bana sonuçları söyle. FLUSH_OAI')"><i class="fas fa-bolt"></i> OAI Flush</button>
       <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('DM bağlamını şimdi güncelle ve son gelişmeleri özetle. READ_DM')"><i class="fas fa-book-open"></i> DM Güncelle</button>
-      <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Mevcut RP atmosferine uygun bir dünya olayı öner. GEN_EVENT')"><i class="fas fa-globe"></i> Olay Öner</button>
+      <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Mevcut RP atmosferine uygun küçük bir sokak olayı veya NPC hareketi yarat ve doğrudan sahneye yaz (SEND_MSG kullan).')"><i class="fas fa-globe"></i> Olay Öner</button>
       <button class="adm-btn" style="font-size:10px;border-color:rgba(232,167,74,.4);color:var(--am)" onclick="(()=>{const rt=S.roomId?RpTime.get(S.roomId):'—';MasterAgent.send('Şu an RP zamanı: '+rt+'. Bir sahne veya olay zamanı ayarlamak istiyorum. Bana öneriler ver ve ne zaman ne yapabileceğimizi planla (mevcut RP saatini baz alarak).');})()"><i class="fas fa-clock"></i> Setup At</button>
       <button class="adm-btn" style="font-size:10px;margin-left:auto;color:var(--rd)" onclick="MasterAgent.clear()"><i class="fas fa-trash"></i> Sohbeti Temizle</button>
     </div>
@@ -3670,19 +3670,29 @@ const MasterAgent = {
       'Hiçbir zaman İngilizce metin üretme. İsim/yer/unvan gibi lore ögeleri',
       'orijinal kalabilir (örn: LSPD, Vinewood) ama cümleler Türkçe olacak.',
       '',
+      '== OYUNCU GİBİ DAVRANIŞ KURALI ==',
+      'Sen gerçek bir oyuncu gibi davranırsın. NPC oluştururken, olay yaratırken,',
+      'bir sahne kurguladığında veya karakter olarak aksiyon aldığında:',
+      '  ✅ MUTLAKA SEND_MSG komutuyla metni doğrudan RP odasına gönder.',
+      '  ❌ GEN_EVENT / GEN_DISPATCH komutlarını sadece GM onayı gereken',
+      '     büyük yapısal olaylar için kullan — içerik zaten SEND_MSG ile',
+      '     gönderilmişse bu komutları KULLANMA.',
+      '',
       '== KULLANABİLECEĞİN KOMUTLAR ==',
       'Yanıtına aşağıdaki komutları göm, sistem otomatik çalıştırır:',
       '',
       'FLUSH_OAI          → Observer AI birikmiş mesajları hemen işle',
       'READ_DM            → DM bağlamını şimdi güncelle',
-      'GEN_EVENT          → Dünya olayı üretme modalını aç',
-      'GEN_DISPATCH:NPC_ID → Belirtilen NPC için dispatch modalını aç',
+      'GEN_EVENT          → (Sadece GM onayı gereken büyük olaylar için) Dünya olayı modalını aç',
+      'GEN_DISPATCH:NPC_ID → (Sadece GM onayı gereken durumlar için) Dispatch modalını aç',
       '',
       'SEND_MSG:{"content":"Mesaj metni","char_id":"KAR_ID","char_name":"Karakter Adı","room_id":"ODA_ID"}',
-      '  → RP odasına belirtilen karakter adına mesaj atar.',
+      '  → RP odasına belirtilen karakter adına mesaj atar — EN SIK KULLANACAĞIN KOMUT BU.',
       '  → char_id ve char_name için mevcut karakterleri kullan (aşağıda liste var).',
       '  → room_id belirtilmezse aktif oda kullanılır.',
-      '  → ÖRNEK: SEND_MSG:{"content":"*Telsizi eline alır* Bütün birimler dikkat! 10-4.","char_name":"Marcus Webb","char_id":"chr_12","room_id":"room_abc"}',
+      '  → Aksiyon/emote için yıldız kullan: *Araçtan iner ve sahneye yaklaşır*',
+      '  → ÖRNEK: SEND_MSG:{"content":"*Telsizi eline alır* Bütün birimler dikkat! 10-4.","char_name":"Marcus Webb","char_id":"chr_12"}',
+      '  → Birden fazla karakter için birden fazla SEND_MSG kullanabilirsin.',
       '',
       '== AKTİF KARİŞTERLER (odaya mesaj atmak için kullan) ==',
       (S.chars||[]).filter(c=>c.status!=='Deceased').slice(0,30).map(c=>
@@ -3759,7 +3769,8 @@ const MasterAgent = {
       catch(e) { results.push('⚠️ DM okuma hatası: ' + e.message); }
     }
 
-    if (/GEN_EVENT/.test(text) && DMPanel?.openGenerateEvent) {
+    // Only open GEN_EVENT modal if MA is NOT also posting content via SEND_MSG
+    if (/GEN_EVENT/.test(text) && DMPanel?.openGenerateEvent && !/SEND_MSG:/.test(text)) {
       DMPanel.openGenerateEvent();
       results.push('✅ Dünya olayı modalı açıldı.');
     }
