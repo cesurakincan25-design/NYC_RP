@@ -5303,6 +5303,18 @@ const MasterAgent = {
       '  → Yeni bir mülk/lokasyon veritabanına (properties tablosu) kaydeder.',
       '  → type: Ev, Daire, Depo, İşyeri, Arsa, Garaj vb.',
       '',
+      'SET_TIME:22:30',
+      '  → Aktif RP odasının saatini değiştirir. Formatlar:',
+      '  SET_TIME:22:30          → saati 22:30\'a ayarla',
+      '  SET_TIME:+1h            → 1 saat ileri al',
+      '  SET_TIME:+30m           → 30 dakika ileri al',
+      '  SET_TIME:-2h            → 2 saat geri al',
+      '  SET_TIME:+1d            → 1 gün ileri al',
+      '  SET_TIME:2025-03-15 22:30 EST → tam tarih/saat/timezone ayarla',
+      '  → Setup atarken veya sahne zaman geçişi yaparken kullan.',
+      '  → Kullanmadan ÖNCE kullanıcıya sor: "RP zamanını [X] olarak ayarlayayım mı?"',
+      '  → Onay aldıktan sonra SET_TIME komutunu kullan.',
+      '',
       '== MESAJ BİÇİMLENDİRME ==',
       'SEND_MSG içinde bu markdown sözdizimini kullanabilirsin — sistem otomatik render eder:',
       '  *aksiyon metni*       → mor italik emote (karakter fiziksek eylem)',
@@ -5525,6 +5537,25 @@ const MasterAgent = {
         results.push(`✅ Mülk kaydedildi → "${newProp.name}" (ID: ${newId})`);
       } catch (e) {
         results.push(`❌ SAVE_PROP hatası: ${e.message}`);
+      }
+    }
+
+    // SET_TIME:<value> — RP odasının saatini değiştir
+    const setTimeMatch = text.match(/SET_TIME:([^\s\n]+(?:\s+[^\n]+)?)/);
+    if (setTimeMatch) {
+      const roomId = S.roomId;
+      if (!roomId) {
+        results.push('❌ SET_TIME: Aktif oda yok');
+      } else {
+        try {
+          const timeStr = setTimeMatch[1].trim();
+          const newRpTime = await RpTime._parseAndApply(roomId, timeStr);
+          const displayTime = RpTime.get(roomId);
+          results.push(`🕐 RP zamanı güncellendi → ${displayTime}`);
+          toast(`🕐 RP zamanı: ${displayTime}`, 'info');
+        } catch(e) {
+          results.push(`❌ SET_TIME hatası: ${e.message}`);
+        }
       }
     }
 
