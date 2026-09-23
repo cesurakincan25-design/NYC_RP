@@ -3691,8 +3691,22 @@ const MasterAgent = {
   /* ── Build context string injected into every user turn ─ */
   _liveCtx() {
     const rpTime = S.roomId ? RpTime.get(S.roomId) : '—';
-    const oaiStats = OAI ? `işlenen mesaj: ${OAI.CFG ? OAI._processed || 0 : 0}, kuyruk: ${OAI.Batcher?._queue?.length || 0}` : '—';
-    return `[CANLI BAĞLAM | RP: ${rpTime} | OAI: ${oaiStats} | Oda: ${S.roomId || '—'}]`;
+    const oaiStats = OAI ? `işlenen: ${OAI._processed||0}, kuyruk: ${OAI.Batcher?._queue?.length||0}` : '—';
+
+    // Last 30 messages from active room
+    const msgs = (S.msgs[S.roomId] || []).slice(-30);
+    let transcript = '';
+    if (msgs.length) {
+      transcript = '\n\n== SON MESAJLAR (aktif oda: ' + (S.roomId||'?') + ') ==\n' +
+        msgs.map(m => {
+          const t = m.rp_time ? m.rp_time.slice(11,16) : (m.created_at ? m.created_at.slice(11,16) : '??:??');
+          return `[${t}] ${m.char_name||'?'}${m.char_alias?' ('+m.char_alias+')':''}: ${(m.content||'').slice(0,200)}`;
+        }).join('\n');
+    } else {
+      transcript = '\n\n== SON MESAJLAR: (bu odada henüz mesaj yok) ==';
+    }
+
+    return `[CANLI BAĞLAM | RP: ${rpTime} | OAI: ${oaiStats} | Oda: ${S.roomId||'—'} | Karakter: ${S.activeChar?.name||'—'}]${transcript}`;
   },
 
   /* ── Execute tool commands embedded in model reply ─────── */
