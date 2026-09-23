@@ -495,7 +495,7 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
   <div id="input-area">
     <div id="input-box">
       <div id="char-tags-bar"></div>
-      <textarea id="msg-input" placeholder="Mesaj yaz…  [emote]  Chip'e tıkla → İsim ekler" rows="1"></textarea>
+      <textarea id="msg-input" placeholder="Mesaj yaz…  [emote]  Chip'e tıkla → İsim ekler  |  # → etiket ekle" rows="1"></textarea>
       <div id="rp-time-override-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px 0;border-top:1px solid rgba(155,111,212,.15)">
         <i class="fas fa-clock" style="font-size:10px;color:var(--pu);opacity:.7"></i>
         <span style="font-family:var(--mono);font-size:9px;color:var(--pu);opacity:.7;text-transform:uppercase;letter-spacing:.08em">RP Zamanı Override</span>
@@ -507,6 +507,7 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
         <button class="tb-btn" onclick="RP.promptAttach()"><i class="fas fa-image"></i></button>
         <button class="tb-btn" id="btn-rpt-override" title="RP Zamanı override" onclick="const b=document.getElementById('rp-time-override-bar');const shown=b.style.display==='flex';b.style.display=shown?'none':'flex';if(!shown){const st=RpTime._state[S.roomId];if(st)document.getElementById('rp-time-override-inp').placeholder=RpTime.fmt(st)+' (boş = otomatik)';document.getElementById('rp-time-override-inp').focus();}"><i class="fas fa-clock" style="color:var(--pu);opacity:.7"></i></button>
         <button class="tb-btn" title="Etiket ekle" onclick="TagPicker.open()"><i class="fas fa-hashtag" style="color:var(--ac)"></i></button>
+        <button class="tb-btn" id="ac-toggle-btn" title="Otomatik tamamlama aç/kapat" onclick="Autocomplete.toggleEnabled()" style="font-size:10px;font-family:var(--mono);color:var(--ac);opacity:.7">AC</button>
         <span class="tb-spc"></span>
         <button id="send-btn" onclick="RP.send()"><i class="fas fa-paper-plane"></i> SEND</button>
       </div>
@@ -1213,10 +1214,16 @@ const RP={
       return;
     }
     try{
-      await DB.post('rp_messages',pl);
-      // Auto-react: let MA continue the scene after user sends a message
+      const ref = await DB.post('rp_messages',pl);
+      // Auto-react: sadece MA'nın bir karakterine reply gelince devreye gir
       if(window.MasterAgent && MasterAgent._autoEnabled !== false){
-        setTimeout(()=>MasterAgent._autoReact(pl), 1200);
+        const msgId = ref?.id || null;
+        const replyToId = pl.reply_to_id || null;
+        // replyToId, MA'nın gönderdiği bir mesajın ID'si mi?
+        const maReplied = replyToId && MasterAgent._sentIds?.has(replyToId);
+        if(maReplied){
+          setTimeout(()=>MasterAgent._autoReact(pl), 1200);
+        }
       }
     }catch(e){toast('Gönderilemedi','error');}
   },
@@ -2206,26 +2213,16 @@ const UI={
       const tag=document.createElement('div');
       tag.className='ctag'+(isP?' ptag':'');
       if(!isP)tag.style.cssText=`background:${orgColor}18;border-color:${orgColor}44;color:${orgColor};`;
-      tag.title=`Tıkla → "${c.name}:" prefix  |  Ctrl+Tık → [etiket] ekle  |  Sağ tık → Profil / Primary`;
+      tag.title=`Tıkla → "${c.name}:" ekler  |  Sağ tık → Profil / Etiket / Primary`;
       tag.innerHTML=`<div class="ctag-ava">${c.image?`<img src="${c.image}" onerror="this.parentNode.innerHTML='${ini}'" loading="lazy">`:ini}</div><span class="ctag-name">${c.name}</span><span class="ctag-rm">✕</span>`;
       tag.addEventListener('click',e=>{
         if(e.target.classList.contains('ctag-rm'))return;
         const inp=document.getElementById('msg-input');
-        if(e.ctrlKey||e.metaKey){
-          // Ctrl+tık → [Karakter:İsim] tag ekle
-          const tag=`[Karakter:${c.name}]`;
-          const cur=inp.selectionStart||inp.value.length;
-          const before=inp.value.slice(0,cur);const after=inp.value.slice(cur);
-          inp.value=before+(before&&!before.endsWith(' ')?' ':'')+tag+' '+after;
-          inp.focus();inp.style.height='auto';inp.style.height=Math.min(inp.scrollHeight,160)+'px';
-          inp.selectionStart=inp.selectionEnd=before.length+(before&&!before.endsWith(' ')?1:0)+tag.length+1;
-        } else {
-          // Normal tık → "İsim: " prefix
-          const val=inp.value;const prefix=`${c.name}: `;
-          inp.value=(val===''||val.endsWith('\n'))?val+prefix:val+'\n'+prefix;
-          inp.focus();inp.style.height='auto';inp.style.height=Math.min(inp.scrollHeight,160)+'px';
-          inp.selectionStart=inp.selectionEnd=inp.value.length;
-        }
+        // Tık → "İsim: " prefix ekle
+        const val=inp.value;const prefix=`${c.name}: `;
+        inp.value=(val===''||val.endsWith('\n'))?val+prefix:val+'\n'+prefix;
+        inp.focus();inp.style.height='auto';inp.style.height=Math.min(inp.scrollHeight,160)+'px';
+        inp.selectionStart=inp.selectionEnd=inp.value.length;
       });
       tag.addEventListener('contextmenu',e=>{
         e.preventDefault();
@@ -3201,11 +3198,23 @@ window.TagPicker = TagPicker;
 /* ═══ AUTOCOMPLETE (tag tamamlama) ═══════════════════════ */
 const Autocomplete = {
   visible: false,
+  _enabled: true,   // mobilde kapatılabilir
   _items: [],
   _sel: -1,
   _el: null,
   _inp: null,
   _triggerStart: -1,
+
+  toggleEnabled() {
+    this._enabled = !this._enabled;
+    const btn = document.getElementById('ac-toggle-btn');
+    if (btn) {
+      btn.style.opacity = this._enabled ? '.7' : '.3';
+      btn.style.textDecoration = this._enabled ? '' : 'line-through';
+      btn.title = this._enabled ? 'Otomatik tamamlama aç/kapat' : 'Otomatik tamamlama KAPALI';
+    }
+    if (!this._enabled) this.hide();
+  },
 
   // Tag tipleri ve arama kaynakları
   _TYPES: [
@@ -3217,6 +3226,7 @@ const Autocomplete = {
   ],
 
   check(inp) {
+    if (!this._enabled) return;
     this._inp = inp;
     const val = inp.value;
     const cur = inp.selectionStart;
@@ -4418,7 +4428,17 @@ const MasterAgent = {
           rp_time:     rpTime || null,
         };
 
-        await DB.post('rp_messages', pl);
+        const msgRef = await DB.post('rp_messages', pl);
+        // MA'nın gönderdiği mesajların ID'lerini takip et (auto-react için)
+        if (msgRef?.id) {
+          if (!MasterAgent._sentIds) MasterAgent._sentIds = new Set();
+          MasterAgent._sentIds.add(msgRef.id);
+          if (MasterAgent._sentIds.size > 50) {
+            // Set'i küçük tut — en eski 25'i sil
+            const arr = [...MasterAgent._sentIds];
+            MasterAgent._sentIds = new Set(arr.slice(arr.length - 25));
+          }
+        }
         results.push(`✅ Mesaj gönderildi → [${charName}] "${params.content.slice(0, 60)}${params.content.length > 60 ? '…' : ''}"`);
       } catch(e) {
         results.push('❌ Mesaj gönderilemedi: ' + e.message);
@@ -4559,6 +4579,7 @@ const MasterAgent = {
   /* ── Auto-react: called after user sends an RP message ── */
   _autoEnabled: true,
   _lastAutoAt: 0,
+  _sentIds: new Set(), // MA'nın gönderdiği mesaj ID'leri — reply kontrolü için
 
   async _autoReact(sentMsg) {
     // Don't auto-react if MA is busy or auto was recently triggered (30s cooldown)
