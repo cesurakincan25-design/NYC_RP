@@ -600,6 +600,7 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
         <button class="ma-sb-qbtn" onclick="MASidebar.quick('DM bağlamını güncelle. READ_DM')">📖 DM</button>
         <button class="ma-sb-qbtn" onclick="MASidebar.quick('Şu anki RP ortamına uygun küçük bir sokak olayı yarat ve ilgili karakterleri oynayarak sahneye yaz (SEND_MSG kullan).')">🌐 Olay</button>
         <button class="ma-sb-qbtn" onclick="MASidebar.setupAct()">⏰ Setup At</button>
+        <button class="ma-sb-qbtn" id="session-start-btn" onclick="Session.startDialog()" style="border-color:rgba(74,143,226,.4);color:var(--ac)" title="Yeni RP Sessionu başlat — setup atar, önceki sessioni kapatır">🎬 Session Başlat</button>
         <button class="ma-sb-qbtn" id="ma-auto-toggle" onclick="MASidebar.toggleAuto()" title="Mesaj gönderince MA otomatik sahneyi devam ettirir">🤖 Oto: AÇ</button>
       </div>
       <!-- Input -->
@@ -1378,12 +1379,18 @@ const RP={
       }
       // @mention bildirimi — etiketlenen oyuncuları bul ve toast'a yansıt
       const mentionMatches=txt.match(/@([A-Za-zÇĞİÖŞÜçğışöü][A-Za-zÇĞİÖŞÜçğışöü\s]{0,20}?)(?=\s|$)/g)||[];
+      // @MA / @MasterAgent mention — MA sidebar'a yönlendir (everyone broadcast'ten ayrı)
+      const hasMAmention = /@(MA|MasterAgent)\b/i.test(txt);
+      if(hasMAmention && window.MasterAgent){
+        MasterAgent.send('Kullanıcı sana RP içinde seslendi: ' + txt);
+        MASidebar.revealForMention();
+      }
       if(mentionMatches.length){
         const names=mentionMatches.map(m=>m.trim());
-        const uniqueNames=[...new Set(names)];
+        const uniqueNames=[...new Set(names)].filter(n=>!/@(MA|MasterAgent)\b/i.test(n));
         if(uniqueNames.includes('@everyone')||uniqueNames.includes('@here')){
           toast('📢 Herkese mention gönderildi','');
-        } else {
+        } else if(uniqueNames.length){
           toast(`📌 ${uniqueNames.join(', ')} etiketlendi`,'');
         }
       }
@@ -2024,6 +2031,7 @@ const RT={
     document.getElementById('empty-state')?.remove();
     if(rec.char_id){ delete S.typing[rec.char_id]; UI.renderTyping(); }
     OAI.Batcher.ingest([rec]);
+    if (window.Session) Session.onNewMessage(rec);
     // Notify if from someone else
     if(notify&&rec.sent_by_user&&rec.sent_by_user!==S.user?.id){
       const room=S.rooms.find(r=>r.id==S.roomId);
@@ -2348,6 +2356,7 @@ const UI={
         `${name}:</span> `;
     });
     /* @mention ve @everyone */
+    t=t.replace(/@(MA|MasterAgent)\b/gi,'<span class="mention-tag" style="background:rgba(155,111,212,.2);color:var(--pu)">@MA</span>');
     t=t.replace(/@(everyone|here)/g,'<span class="mention-tag mention-everyone">@$1</span>');
     t=t.replace(/@([A-Za-zÇĞİÖŞÜçğışöü][A-Za-zÇĞİÖŞÜçğışöü\s]{0,20}?)(?=\s|<|$)/g,(full,name)=>{
       const lname=name.trim().toLowerCase();
@@ -3808,12 +3817,13 @@ const Autocomplete = {
       this._triggerStart = before.length - mentionM[0].length;
       // Oyuncu listesi: USERS + @everyone/@here
       const players = (typeof USERS !== 'undefined' ? USERS : (S.players||[]));
+      const maEntry = {name:'MA', sub:"Master Agent'a yönlendir", id:'__ma__', icon:'🤖'};
       const specials = [{name:'everyone', sub:'Herkesi etiketle', id:'everyone'},{name:'here', sub:'Aktif oyuncuları etiketle', id:'here'}];
-      const all = [...specials, ...players.map(u=>({name:u.name||u.username||u.id, sub:u.display||'', id:u.id}))];
+      const all = [maEntry, ...specials, ...players.map(u=>({name:u.name||u.username||u.id, sub:u.display||'', id:u.id}))];
       const hits = all.filter(p => !q || p.name.toLowerCase().startsWith(q)).slice(0,8);
       if (!hits.length) { this.hide(); return; }
       this._items = hits.map(p => ({
-        text: p.name, sub: p.sub, icon: 'at', color: '#4a8fe2',
+        text: p.name, sub: p.sub, icon: p.icon||'at', color: p.id==='__ma__'?'#9b6fd4':'#4a8fe2',
         insert: `@${p.name}`,
       }));
       this._sel = 0; this._render(inp); return;
@@ -5219,6 +5229,7 @@ const MasterAgent = {
         if (msgRef?.id) {
           if (!MasterAgent._sentIds) MasterAgent._sentIds = new Set();
           MasterAgent._sentIds.add(msgRef.id);
+          if (window.Session) Session.onMAMessage(msgRef.id);
           if (MasterAgent._sentIds.size > 50) {
             // Set'i küçük tut — en eski 25'i sil
             const arr = [...MasterAgent._sentIds];
@@ -5482,9 +5493,171 @@ const MASidebar = {
     }
     this._appendMsg(text, 'model');
   },
+
+  revealForMention() {
+    const body = document.getElementById('ma-sb-body');
+    if (body && body.style.display === 'none') this.toggle();
+    const log = document.getElementById('ma-sb-log');
+    if (log) setTimeout(() => log.scrollTop = log.scrollHeight, 300);
+  },
 };
 
 window.MASidebar = MASidebar;
+
+/* ═══ SESSION MANAGER ══════════════════════════════════════════ */
+const Session = {
+  _active: false,
+  _startMsgId: null,
+  _startTime: null,
+  _mode: 'auto',
+
+  startDialog() {
+    const modal = document.createElement('div');
+    modal.id = 'session-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9998;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
+    modal.innerHTML = `
+      <div style="background:var(--bg2);border:1px solid var(--ln2);border-radius:16px;padding:24px;max-width:380px;width:90%;box-shadow:0 24px 64px rgba(0,0,0,.6)">
+        <div style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ac);margin-bottom:4px">🎬 Session Başlat</div>
+        <div style="font-size:13px;color:var(--t1);margin-bottom:16px;line-height:1.5">
+          Master Agent bir Setup mesajı atar ve yeni session açılır.<br>
+          <span style="color:var(--t3);font-size:11px">Önceki session varsa Observer AI özet çıkarır ve Firebase'e kaydeder.</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">
+          <label class="sess-opt" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:var(--bg3);border:1px solid var(--ac);border-radius:8px;cursor:pointer" onclick="document.getElementById('session-mode').value='auto';document.querySelectorAll('.sess-opt').forEach(e=>e.style.borderColor='var(--ln)');this.style.borderColor='var(--ac)'">
+            <span style="font-size:18px;flex-shrink:0">🤖</span>
+            <span>
+              <strong style="display:block;color:var(--t0);font-size:12.5px">Tam Otomatik</strong>
+              <span style="color:var(--t3);font-size:11px">Setup atılır, session takip edilir. Sonraki setup gelince OAI çalışır, backup alınır.</span>
+            </span>
+          </label>
+          <label class="sess-opt" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:var(--bg3);border:1px solid var(--ln);border-radius:8px;cursor:pointer" onclick="document.getElementById('session-mode').value='manual';document.querySelectorAll('.sess-opt').forEach(e=>e.style.borderColor='var(--ln)');this.style.borderColor='var(--ac)'">
+            <span style="font-size:18px;flex-shrink:0">🎛️</span>
+            <span>
+              <strong style="display:block;color:var(--t0);font-size:12.5px">Manuel</strong>
+              <span style="color:var(--t3);font-size:11px">Setup atılır. Sona erdiğinde "Session Kapat" butonuna basarsın.</span>
+            </span>
+          </label>
+        </div>
+        <input type="hidden" id="session-mode" value="auto">
+        <div style="display:flex;gap:8px">
+          <button onclick="document.getElementById('session-modal').remove()" style="flex:1;padding:9px;background:var(--bg3);border:1px solid var(--ln);color:var(--t2);border-radius:8px;cursor:pointer;font-size:12px">İptal</button>
+          <button onclick="Session._doStart(document.getElementById('session-mode').value);document.getElementById('session-modal').remove();" style="flex:2;padding:9px;background:rgba(74,143,226,.2);border:1px solid rgba(74,143,226,.4);color:var(--ac);border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">🎬 Başlat</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  },
+
+  async _doStart(mode) {
+    if (this._active && this._startMsgId) {
+      await this._endCurrent('Session yeniden başlatıldı — önceki session kapatılıyor.');
+    }
+    this._active = true;
+    this._mode = mode;
+    this._startTime = new Date();
+    this._startMsgId = null;
+    const setupPrompt = `Yeni bir RP sessionu başlatılıyor. RP ortamı için kapsamlı bir setup mesajı hazırla ve SEND_MSG komutu ile RP odasına gönder. Setup şunları içermeli: ortam tanımı, hava durumu, aktif lokasyonlar, güncel gerilim/olaylar. Bunu bir setup mesajı olarak hazırla — RP'nin açılışı gibi.`;
+    MASidebar.quick(setupPrompt);
+    this._updateBtn();
+    toast('🎬 Session başlatılıyor…', 'info');
+  },
+
+  onMAMessage(msgId) {
+    if (this._active && !this._startMsgId) {
+      this._startMsgId = msgId;
+      toast('🎬 Session aktif — setup mesajı gönderildi', 'success');
+      this._updateBtn();
+    }
+  },
+
+  async endSession(reason = 'manual') {
+    if (!this._active) { toast('Aktif session yok', ''); return; }
+    await this._endCurrent(reason);
+  },
+
+  async _endCurrent(reason) {
+    toast('⏳ Session kapatılıyor, Observer AI çalışıyor…', 'info');
+    this._active = false;
+    this._updateBtn();
+    const roomId = S.roomId;
+    if (roomId) {
+      try {
+        await OAI.processRoom(roomId, 100);
+        toast('📋 Observer AI özet çıkardı', 'success');
+      } catch(e) { console.error('[Session] OAI error', e); }
+    }
+    await this._saveBackup(roomId, reason);
+    if (window.MasterAgent) {
+      MasterAgent._history.push({role:'user', parts:[{text:'[SYSTEM] Session kapatıldı. Neden: ' + reason}]});
+      MasterAgent._history.push({role:'model', parts:[{text:'[Session kapandı, hazırım.]'}]});
+    }
+    this._startMsgId = null;
+    this._startTime = null;
+  },
+
+  async _saveBackup(roomId, reason) {
+    if (!roomId) return;
+    try {
+      const msgs = await DB.get(`rp_messages?room_id=eq.${roomId}&order=created_at.asc&limit=200`).catch(() => []);
+      if (!msgs.length) return;
+      const backup = {
+        room_id: roomId,
+        session_start: this._startTime?.toISOString() || null,
+        session_end: new Date().toISOString(),
+        end_reason: reason,
+        message_count: msgs.length,
+        messages_snapshot: msgs,
+        created_by: S.user?.id || null,
+        app_version: 'nyc_rp_v1'
+      };
+      try {
+        await DB.post('rp_session_backups', backup);
+        toast('💾 Session backup Firebase\'e kaydedildi', 'success');
+      } catch(e) {
+        const key = 'nyc_session_backup_' + Date.now();
+        try { localStorage.setItem(key, JSON.stringify(backup)); toast('💾 Session backup locale kaydedildi', ''); } catch(_) {}
+        console.warn('[Session] rp_session_backups tablosu yok, local backup alındı', e);
+      }
+    } catch(e) { console.error('[Session] backup error', e); }
+  },
+
+  _updateBtn() {
+    const btn = document.getElementById('session-start-btn');
+    if (!btn) return;
+    if (this._active) {
+      btn.textContent = '🔴 Session Kapat';
+      btn.style.borderColor = 'rgba(232,74,74,.5)';
+      btn.style.color = 'var(--rd)';
+      btn.onclick = () => Session.endSession('manual');
+    } else {
+      btn.textContent = '🎬 Session Başlat';
+      btn.style.borderColor = 'rgba(74,143,226,.4)';
+      btn.style.color = 'var(--ac)';
+      btn.onclick = () => Session.startDialog();
+    }
+  },
+
+  onNewMessage(msg) {
+    if (!this._active || this._mode !== 'auto') return;
+    if (this._startMsgId && msg.id !== this._startMsgId) {
+      const isMAMsg = MasterAgent._sentIds?.has(msg.id);
+      const isSetupLike = /setup|ortam|hava|lokasyon|sahne|başlıyor|açılış/i.test(msg.content || '');
+      if (isMAMsg && isSetupLike) {
+        this._endCurrent('Yeni setup mesajı algılandı — otomatik session sonu');
+        setTimeout(() => {
+          this._active = true;
+          this._startMsgId = msg.id;
+          this._startTime = new Date();
+          this._mode = 'auto';
+          this._updateBtn();
+          toast('🎬 Yeni session otomatik başlatıldı', 'success');
+        }, 2000);
+      }
+    }
+  }
+};
+
+window.Session = Session;
 </script>
 
 <script src="rp_features.js"></script>
