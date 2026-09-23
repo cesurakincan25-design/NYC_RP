@@ -102,7 +102,6 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 .sb-brand em{color:var(--ac);font-style:normal}
 #sb-nav{flex:1;overflow-y:auto;padding:8px 0}
 .nav-lbl{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.12em;color:var(--t3);text-transform:uppercase;padding:12px 14px 4px;user-select:none}
-.room-item{display:flex;align-items:center;gap:8px;padding:7px 14px;cursor:pointer;transition:background var(--tr);user-select:none;position:relative}
 .room-item:hover{background:var(--bg3)}
 .room-item.active{background:var(--ac-d)}
 .room-item.active::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--ac)}
@@ -214,6 +213,26 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 .rpill.on{background:var(--ac-d);border-color:var(--ac)}
 .rcnt{font-family:var(--mono);font-size:10px;color:var(--t2)}
 .rpill.on .rcnt{color:var(--ac)}
+/* ═══ CONTEXT MENU ════════════════════════════════════════ */
+.ctx-menu{position:fixed;z-index:9999;background:var(--bg2);border:1px solid var(--ln2);border-radius:12px;padding:6px;min-width:200px;box-shadow:0 16px 48px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.04);backdrop-filter:blur(8px);animation:ctxIn .1s ease}
+@keyframes ctxIn{from{opacity:0;transform:scale(.96) translateY(-4px)}to{opacity:1;transform:scale(1) translateY(0)}}
+.ctx-header{padding:8px 12px 4px;font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--ln);margin-bottom:4px}
+.ctx-item{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;background:none;border:none;color:var(--t1);cursor:pointer;font-size:12.5px;border-radius:8px;font-family:var(--sans);text-align:left;transition:background .1s,color .1s;position:relative}
+.ctx-item:hover{background:var(--bg4);color:var(--t0)}
+.ctx-item .ctx-icon{width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:12px;opacity:.65;flex-shrink:0}
+.ctx-item:hover .ctx-icon{opacity:1}
+.ctx-item.danger{color:var(--rd)}
+.ctx-item.danger:hover{background:var(--rd-d);color:var(--rd)}
+.ctx-item.success{color:var(--gn)}
+.ctx-item.success:hover{background:var(--gn-d);color:var(--gn)}
+.ctx-item .ctx-kbd{margin-left:auto;font-family:var(--mono);font-size:9px;color:var(--t3);background:var(--bg4);border:1px solid var(--ln2);border-radius:3px;padding:1px 5px;letter-spacing:.04em}
+.ctx-sep{height:1px;background:var(--ln);margin:4px 6px}
+/* Oda listesi sürükleme */
+.room-item{display:flex;align-items:center;gap:8px;padding:7px 14px;cursor:pointer;transition:background var(--tr);user-select:none;position:relative}
+.room-drag-handle{display:none;align-items:center;justify-content:center;width:14px;height:20px;cursor:grab;color:var(--t3);font-size:9px;flex-shrink:0;margin-left:auto;opacity:0;transition:opacity .15s}
+.room-item:hover .room-drag-handle{display:flex;opacity:1}
+.room-item.dragging{opacity:.4;background:var(--bg4)}
+.room-item.drag-over{background:rgba(74,143,226,.12);border-top:2px solid var(--ac)}
 /* hover actions */
 .msg-actions{position:absolute;right:12px;top:2px;display:none;align-items:center;background:var(--bg2);border:1px solid var(--ln2);border-radius:6px;padding:3px 4px;z-index:10;box-shadow:0 4px 16px rgba(0,0,0,.4)}
 .msg-group:hover .msg-actions{display:flex}
@@ -1574,6 +1593,54 @@ const RP={
     if(S.roomId==roomId){const first=S.rooms.find(r=>!r.is_archived);if(first)RP.switchRoom(first.id);}
     toast('Oda silindi','success');
   },
+
+  // Odayı ↑ veya ↓ taşı
+  async moveRoom(roomId, dir){
+    const active = S.rooms.filter(r=>!r.is_archived);
+    const idx = active.findIndex(r=>r.id==roomId);
+    if(idx<0) return;
+    const swapIdx = dir==='up' ? idx-1 : idx+1;
+    if(swapIdx<0||swapIdx>=active.length) return;
+    // Swap sort_order values
+    const a=active[idx], b=active[swapIdx];
+    const ao=a.sort_order??idx, bo=b.sort_order??swapIdx;
+    a.sort_order=bo; b.sort_order=ao;
+    // Reorder S.rooms array in-place
+    const archStart = S.rooms.findIndex(r=>r.is_archived);
+    const archived = archStart>=0 ? S.rooms.slice(archStart) : [];
+    S.rooms = [...active.sort((x,y)=>(x.sort_order??0)-(y.sort_order??0)), ...archived];
+    UI.renderRooms();
+    // Persist
+    if(!S._off){
+      try{
+        await Promise.all([
+          DB.patch('rp_rooms',`id=eq.${a.id}`,{sort_order:a.sort_order}),
+          DB.patch('rp_rooms',`id=eq.${b.id}`,{sort_order:b.sort_order}),
+        ]);
+      }catch(e){ toast('Sıralama kaydedilemedi','error'); }
+    }
+  },
+
+  // Drag-drop: fromId'yi toId'nin önüne koy
+  async reorderRoom(fromId, toId){
+    const active = S.rooms.filter(r=>!r.is_archived);
+    const fi = active.findIndex(r=>r.id==fromId);
+    const ti = active.findIndex(r=>r.id==toId);
+    if(fi<0||ti<0||fi===ti) return;
+    const [moved] = active.splice(fi,1);
+    active.splice(ti,0,moved);
+    active.forEach((r,i)=>r.sort_order=i);
+    const archStart = S.rooms.findIndex(r=>r.is_archived);
+    const archived = archStart>=0 ? S.rooms.slice(archStart) : [];
+    S.rooms=[...active,...archived];
+    UI.renderRooms();
+    if(!S._off){
+      try{
+        await Promise.all(active.map(r=>DB.patch('rp_rooms',`id=eq.${r.id}`,{sort_order:r.sort_order})));
+      }catch(e){ toast('Sıralama kaydedilemedi','error'); }
+    }
+  },
+
   /* chars */
   toggleChar(c){
     const idx=S.activeChars.findIndex(x=>x.id===c.id);
@@ -2036,7 +2103,7 @@ const Notif={
 const UI={
   renderRooms(){
     const list=document.getElementById('room-list');list.innerHTML='';
-    const active=S.rooms.filter(r=>!r.is_archived);
+    const active=S.rooms.filter(r=>!r.is_archived).sort((a,b)=>(a.sort_order??99)-(b.sort_order??99));
     const archived=S.rooms.filter(r=>r.is_archived);
     active.forEach(room=>this._renderRoomItem(list,room));
     if(archived.length){
@@ -2052,36 +2119,63 @@ const UI={
     const el=document.createElement('div');
     el.className='room-item'+(room.id==S.roomId?' active':'')+(isArchived?' archived-room':'');
     el.dataset.id=room.id;
+    el.dataset.roomId=room.id;
     const rtype=room.room_type||( room.is_live?'live': room.is_ooc?'ooc': room.is_announcement?'announcement': room.is_private?'private':'ic');
     const rtIcon=isArchived?'🗄':{live:'●',ic:'🎭',ooc:'💬',private:'🔒',announcement:'📢'}[rtype]||'#';
     const rtColor=rtype==='live'?'color:var(--rd)':'';
     el.innerHTML=`<span class="room-type-badge" style="${rtColor}">${rtIcon}</span>
       <span class="room-name" style="${isArchived?'color:var(--t3)':''}">${room.name}</span>
-      ${rtype==='live'?'<span class="room-live">LIVE</span>':''}`;
-    el.onclick=()=>{RP.switchRoom(room.id);document.getElementById('sidebar').classList.remove('open');document.getElementById('sb-overlay').classList.remove('show');};
-    // Right-click context menu
+      ${rtype==='live'?'<span class="room-live">LIVE</span>':''}
+      <span class="room-drag-handle" title="Sürükle & Bırak" draggable="false">⠿</span>`;
+    el.onclick=(ev)=>{
+      if(ev.target.closest('.room-drag-handle'))return;
+      RP.switchRoom(room.id);
+      document.getElementById('sidebar').classList.remove('open');
+      document.getElementById('sb-overlay').classList.remove('show');
+    };
+
+    // Drag-to-reorder (only active rooms)
+    if(!isArchived){
+      el.draggable=true;
+      el.addEventListener('dragstart',e=>{
+        e.dataTransfer.effectAllowed='move';
+        e.dataTransfer.setData('text/plain',room.id);
+        el.classList.add('dragging');
+        UI._dragRoomId=room.id;
+      });
+      el.addEventListener('dragend',()=>{el.classList.remove('dragging');UI._dragRoomId=null;document.querySelectorAll('.room-item.drag-over').forEach(x=>x.classList.remove('drag-over'));});
+      el.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='move';if(UI._dragRoomId&&UI._dragRoomId!==room.id){document.querySelectorAll('.room-item.drag-over').forEach(x=>x.classList.remove('drag-over'));el.classList.add('drag-over');}});
+      el.addEventListener('dragleave',()=>el.classList.remove('drag-over'));
+      el.addEventListener('drop',e=>{
+        e.preventDefault();
+        el.classList.remove('drag-over');
+        const fromId=e.dataTransfer.getData('text/plain')||UI._dragRoomId;
+        if(fromId&&fromId!==room.id) RP.reorderRoom(fromId,room.id);
+      });
+    }
+
+    // Right-click context menu — yeni UI
     el.addEventListener('contextmenu',e=>{
       e.preventDefault();
-      const menuItems=[
-        {icon:'fa-copy',label:'Odayı Kopyala (Arşiv)',action:()=>RP.copyRoom(room.id)},
-        {icon:'fa-archive',label:isArchived?'Arşivden Çıkar':'Arşive Al',action:()=>RP.toggleArchive(room.id,!isArchived)},
-        'sep',
-        {icon:'fa-edit',label:'Yeniden Adlandır',action:()=>RP.renameRoom(room.id,room.name)},
-        {icon:'fa-trash',label:'Odayı Sil',action:()=>RP.deleteRoom(room.id),danger:true},
-      ];
-      // Mini inline context menu
-      const menu=document.createElement('div');
-      menu.className='ctx-menu';
-      menu.style.cssText=`position:fixed;left:${Math.min(e.clientX,window.innerWidth-180)}px;top:${e.clientY}px;z-index:500`;
-      menuItems.forEach(item=>{
-        if(item==='sep'){const s=document.createElement('div');s.className='ctx-sep';menu.appendChild(s);return;}
-        const mi=document.createElement('div');mi.className='ctx-item'+(item.danger?' danger':'');
-        mi.innerHTML=`<i class="fas ${item.icon}"></i>${item.label}`;
-        mi.onclick=()=>{menu.remove();item.action();};
-        menu.appendChild(mi);
-      });
-      document.body.appendChild(menu);
-      setTimeout(()=>document.addEventListener('click',()=>menu.remove(),{once:true}),50);
+      const activeRooms=S.rooms.filter(r=>!r.is_archived);
+      const idx=activeRooms.findIndex(r=>r.id==room.id);
+      const canUp=!isArchived&&idx>0;
+      const canDown=!isArchived&&idx<activeRooms.length-1;
+
+      ContextMenu.showRoom(e.clientX,e.clientY,room,[
+        { group:'Sırala', items:[
+          {icon:'fa-arrow-up',   label:'Yukarı Taşı',  action:()=>RP.moveRoom(room.id,'up'),   disabled:!canUp},
+          {icon:'fa-arrow-down', label:'Aşağı Taşı',   action:()=>RP.moveRoom(room.id,'down'), disabled:!canDown},
+        ]},
+        { group:'Oda', items:[
+          {icon:'fa-copy',    label:'Arşiv Kopyası Al',        action:()=>RP.copyRoom(room.id)},
+          {icon:'fa-archive', label:isArchived?'Arşivden Çıkar':'Arşive Al', action:()=>RP.toggleArchive(room.id,!isArchived)},
+          {icon:'fa-edit',    label:'Yeniden Adlandır',        action:()=>RP.renameRoom(room.id,room.name)},
+        ]},
+        { group:'Tehlikeli', items:[
+          {icon:'fa-trash',   label:'Odayı Sil',       action:()=>RP.deleteRoom(room.id),       danger:true},
+        ]},
+      ]);
     });
     list.appendChild(el);
   },
@@ -2493,22 +2587,66 @@ const UI={
 /* ═══ CONTEXT MENU ══════════════════════════════════════ */
 const ContextMenu = {
   _el: null,
-  show(x, y, items) {
+  _build(x, y) {
     this.hide();
     const m = document.createElement('div');
     m.className = 'ctx-menu';
-    m.style.cssText = `position:fixed;left:${Math.min(x, innerWidth-200)}px;top:${Math.min(y, innerHeight-items.length*36-8)}px;z-index:9999;background:var(--bg3);border:1px solid var(--ln2);border-radius:8px;padding:4px;min-width:160px;box-shadow:0 8px 24px #0008`;
+    // Position will be set after append to know actual height
+    m.style.cssText = `position:fixed;left:-9999px;top:-9999px;`;
+    document.body.appendChild(m);
+    this._el = m;
+    return m;
+  },
+  _position(m, x, y) {
+    const mw = m.offsetWidth || 210;
+    const mh = m.offsetHeight || 200;
+    const lx = Math.min(x, innerWidth - mw - 8);
+    const ly = Math.min(y, innerHeight - mh - 8);
+    m.style.left = lx + 'px';
+    m.style.top  = ly + 'px';
+  },
+  // Basit tek-liste menü (messages vb.)
+  show(x, y, items) {
+    const m = this._build(x, y);
     items.forEach(it => {
+      if (it === 'sep') { const s = document.createElement('div'); s.className = 'ctx-sep'; m.appendChild(s); return; }
       const b = document.createElement('button');
-      b.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;background:none;border:none;color:var(--t1);cursor:pointer;font-size:12px;border-radius:5px;font-family:var(--sans);text-align:left';
-      b.innerHTML = `<i class="fas ${it.icon}" style="width:14px;opacity:.7"></i>${it.label}`;
-      b.onmouseenter = () => b.style.background = 'var(--bg4)';
-      b.onmouseleave = () => b.style.background = '';
+      b.className = 'ctx-item' + (it.danger ? ' danger' : '') + (it.disabled ? ' disabled' : '');
+      if (it.disabled) b.style.opacity = '.4';
+      b.style.pointerEvents = it.disabled ? 'none' : '';
+      b.innerHTML = `<span class="ctx-icon"><i class="fas ${it.icon}"></i></span>${it.label}`;
       b.onclick = () => { it.action(); this.hide(); };
       m.appendChild(b);
     });
-    document.body.appendChild(m);
-    this._el = m;
+    requestAnimationFrame(() => this._position(m, x, y));
+    setTimeout(() => document.addEventListener('click', () => this.hide(), {once:true}), 50);
+  },
+  // Gruplu oda menüsü
+  showRoom(x, y, room, groups) {
+    const m = this._build(x, y);
+    // Oda başlığı
+    const hdr = document.createElement('div');
+    hdr.className = 'ctx-header';
+    hdr.innerHTML = `<i class="fas fa-door-open" style="margin-right:5px;opacity:.6"></i>${room.name}`;
+    m.appendChild(hdr);
+    groups.forEach((grp, gi) => {
+      if (gi > 0) { const s = document.createElement('div'); s.className = 'ctx-sep'; m.appendChild(s); }
+      if (grp.group) {
+        const lbl = document.createElement('div');
+        lbl.style.cssText = 'padding:4px 12px 2px;font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);';
+        lbl.textContent = grp.group;
+        m.appendChild(lbl);
+      }
+      grp.items.forEach(it => {
+        const b = document.createElement('button');
+        b.className = 'ctx-item' + (it.danger ? ' danger' : '') + (it.success ? ' success' : '');
+        if (it.disabled) { b.style.opacity = '.35'; b.style.pointerEvents = 'none'; }
+        b.innerHTML = `<span class="ctx-icon"><i class="fas ${it.icon}"></i></span><span style="flex:1">${it.label}</span>`;
+        b.onclick = () => { it.action(); this.hide(); };
+        m.appendChild(b);
+      });
+    });
+    requestAnimationFrame(() => this._position(m, x, y));
     setTimeout(() => document.addEventListener('click', () => this.hide(), {once:true}), 50);
   },
   hide() { this._el?.remove(); this._el = null; }
