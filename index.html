@@ -925,10 +925,11 @@ function toast(msg,t=''){
 
 /* ═══ FIREBASE MESSAGING HELPERS ════════════════════════ */
 // Waits for Firebase SDK to be ready, then returns {db, fs} for Firestore ops
-function _fbReady(){
-  return new Promise(res=>{
+function _fbReady(timeoutMs=8000){
+  return new Promise((res,rej)=>{
     if(window._fbFirestoreReady&&window._fbDb){res({db:window._fbDb,fs:window._fbFirestore});return;}
-    window.addEventListener('firebase-ready',()=>res({db:window._fbDb,fs:window._fbFirestore}),{once:true});
+    const t=setTimeout(()=>rej(new Error('Firebase timeout')),[timeoutMs]);
+    window.addEventListener('firebase-ready',()=>{clearTimeout(t);res({db:window._fbDb,fs:window._fbFirestore});},{once:true});
   });
 }
 
@@ -1456,6 +1457,12 @@ let _nsfwMode = false;
 const RP={
   async init(){
     document.getElementById('loader').classList.remove('hidden');
+    // Güvenlik: 12s sonra loader her halükarda kapansın, takılı kalmasın
+    const _loaderGuard=setTimeout(()=>{
+      document.getElementById('loader').classList.add('hidden');
+      document.getElementById('view-rp').classList.add('active');
+      console.warn('[RP] init timeout — loader force-hidden');
+    },12000);
     try{
       // Firebase'den NYC_DB çek
       const d = await window._fbLoadDB('nyc_db');
@@ -1476,6 +1483,7 @@ const RP={
     setTimeout(()=>QuickBar?.render(), 800); // Veriler yüklendikten sonra şeridi doldur
     const live=S.rooms.find(r=>r.slug==='live')||S.rooms[0];
     if(live)await RP.switchRoom(live.id);
+    clearTimeout(_loaderGuard);
     document.getElementById('view-rp').classList.add('active');
     document.getElementById('loader').classList.add('hidden');
     setInterval(()=>RP._hb(),15000);
