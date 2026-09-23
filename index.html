@@ -256,35 +256,15 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 #input-box{background:var(--bg2);border:1px solid var(--ln);border-radius:6px;display:flex;flex-direction:column;overflow:hidden;transition:border-color var(--tr)}
 #input-box:focus-within{border-color:var(--ln2)}
 /* ── Entity bar ── */
-#entity-bar{display:flex;align-items:center;gap:5px;padding:7px 10px 0;flex-wrap:wrap;min-height:0}
-#entity-chips{display:flex;flex-wrap:wrap;gap:5px;align-items:center;flex:1;min-width:0}
-#entity-tag-btn{width:26px;height:26px;border-radius:6px;border:1px dashed var(--t3);background:none;color:var(--t3);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;transition:all .15s}
-#entity-tag-btn:hover,#entity-tag-btn.active{border-color:var(--ac);color:var(--ac);background:rgba(124,77,255,.1)}
-/* entity search panel */
-#entity-search-bar{border-top:1px solid var(--ln);padding:6px 10px 8px;display:flex;flex-direction:column;gap:6px}
-#es-type-row{display:flex;align-items:center;gap:4px}
-.es-type{width:26px;height:26px;border-radius:6px;border:1px solid var(--ln2);background:none;color:var(--t3);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:11px;transition:all .12s;flex-shrink:0}
-.es-type.active{background:rgba(124,77,255,.15);border-color:rgba(124,77,255,.5);color:var(--ac)}
-#es-inp{flex:1;background:var(--bg4);border:1px solid var(--ln2);border-radius:6px;padding:4px 8px;color:var(--t0);font-family:var(--sans);font-size:12px;outline:none}
-#es-inp:focus{border-color:var(--ln3)}
-#es-close{width:22px;height:22px;border-radius:5px;border:none;background:none;color:var(--t3);cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-#es-close:hover{color:var(--t1)}
-#es-results{display:flex;flex-wrap:wrap;gap:5px;max-height:120px;overflow-y:auto}
-.es-result{display:inline-flex;align-items:center;gap:5px;padding:3px 9px 3px 5px;border-radius:20px;border:1px solid var(--ln2);background:var(--bg4);cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--t1);transition:all .12s;white-space:nowrap}
-.es-result:hover{background:var(--bg5);border-color:var(--ln3)}
-.es-result-ava{width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;flex-shrink:0;overflow:hidden;background:rgba(255,255,255,.1)}
-.es-result-ava img{width:100%;height:100%;object-fit:cover;border-radius:50%}
-/* scene char chips */
-.ctag{display:inline-flex;align-items:center;gap:5px;padding:3px 8px 3px 5px;border-radius:20px;cursor:pointer;user-select:none;font-family:var(--mono);font-size:11px;font-weight:500;transition:all .15s;border:1px solid;max-width:160px}
-.ctag:hover{filter:brightness(1.15)}
-.ctag-ava{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0;overflow:hidden;background:rgba(255,255,255,.1)}
-.ctag-ava img{width:100%;height:100%;object-fit:cover;border-radius:50%}
-.ctag-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
-.ctag-rm{width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;opacity:.6;flex-shrink:0;background:rgba(255,255,255,.15)}
-.ctag:hover .ctag-rm{opacity:1;background:rgba(255,255,255,.3)}
-.ctag.ptag{background:rgba(74,143,226,.18);border-color:rgba(74,143,226,.5);color:#7db3f0}
-#add-char-btn{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:20px;border:1px dashed var(--t3);background:none;color:var(--t3);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .15s}
-#add-char-btn:hover{border-color:var(--t1);color:var(--t1)}
+/* Quick entity bar (chat üstü hızlı etiket şeridi) */
+#quick-entity-bar{display:flex;align-items:center;gap:5px;padding:5px 12px;border-bottom:1px solid var(--ln);background:var(--bg1);overflow-x:auto;flex-shrink:0;min-height:0;scrollbar-width:none}
+#quick-entity-bar::-webkit-scrollbar{display:none}
+.qe-label{font-family:var(--mono);font-size:9px;color:var(--t3);letter-spacing:.08em;text-transform:uppercase;flex-shrink:0;padding-right:4px}
+.qe-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 8px 2px 5px;border-radius:16px;cursor:pointer;font-family:var(--mono);font-size:11px;font-weight:500;white-space:nowrap;border:1px solid;transition:filter .12s,opacity .12s;flex-shrink:0;user-select:none}
+.qe-chip:hover{filter:brightness(1.2)}
+.qe-chip-ava{width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;flex-shrink:0;overflow:hidden}
+.qe-chip-ava img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.qe-sep{width:1px;height:16px;background:var(--ln2);flex-shrink:0;margin:0 2px}
 #msg-input{width:100%;background:transparent;border:none;outline:none;color:var(--t0);font-family:var(--sans);font-size:13.5px;padding:8px 12px;resize:none;min-height:40px;max-height:160px;overflow-y:auto;line-height:1.5}
 #msg-input::placeholder{color:var(--t3)}
 #input-toolbar{display:flex;align-items:center;gap:2px;padding:4px 8px 6px}
@@ -534,29 +514,14 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
     <button class="rp-time-pill" id="rp-time-pill" onclick="RpTime.openModal(S.roomId)" title="RP Zaman Yöneticisi"><i class="fas fa-clock" style="font-size:9px"></i><span id="rp-time-display">— : —</span></button>
     <button class="hdr-btn" id="btn-mem"><i class="fas fa-users"></i></button>
   </div>
+  <!-- Hızlı Etiket Şeridi — chat header altında -->
+  <div id="quick-entity-bar"></div>
   <div id="messages-list"><div class="empty" id="empty-state"><i class="fas fa-comment-slash"></i><p>Sahne boş — başlat</p></div></div>
   <div id="ai-bar"><i class="fas fa-brain" style="margin-right:6px;opacity:.6"></i><span id="ai-bar-txt"></span><button id="ai-bar-x" onclick="document.getElementById('ai-bar').classList.remove('show')">✕</button></div>
   <div id="reply-bar"><i class="fas fa-reply" style="color:var(--ac);font-size:11px;flex-shrink:0"></i><span id="rbs"></span><span id="rbt"></span><button id="rbc" onclick="RP.clearReply()">✕</button></div>
   <div id="typing-area"></div>
   <div id="input-area">
     <div id="input-box">
-      <!-- Smart entity bar: sahne karakterleri + etiket arama -->
-      <div id="entity-bar">
-        <div id="entity-chips"></div>
-        <button id="entity-tag-btn" title="Etiket ekle" onclick="EntityBar.toggleSearch()"><i class="fas fa-hashtag"></i></button>
-      </div>
-      <div id="entity-search-bar" style="display:none">
-        <div id="es-type-row">
-          <button class="es-type active" data-type="Karakter" onclick="EntityBar.setType('Karakter',this)"><i class="fas fa-user"></i></button>
-          <button class="es-type" data-type="Araç" onclick="EntityBar.setType('Araç',this)"><i class="fas fa-car"></i></button>
-          <button class="es-type" data-type="Org" onclick="EntityBar.setType('Org',this)"><i class="fas fa-building"></i></button>
-          <button class="es-type" data-type="Mülk" onclick="EntityBar.setType('Mülk',this)"><i class="fas fa-home"></i></button>
-          <button class="es-type" data-type="Ekipman" onclick="EntityBar.setType('Ekipman',this)"><i class="fas fa-box"></i></button>
-          <input id="es-inp" type="text" placeholder="Ara…" oninput="EntityBar.search(this.value)" autocomplete="off">
-          <button id="es-close" onclick="EntityBar.closeSearch()"><i class="fas fa-times"></i></button>
-        </div>
-        <div id="es-results"></div>
-      </div>
       <textarea id="msg-input" placeholder="Mesaj yaz…  *emote*  [OOC]" rows="1"></textarea>
       <div id="rp-time-override-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px 0;border-top:1px solid rgba(155,111,212,.15)">
         <i class="fas fa-clock" style="font-size:10px;color:var(--pu);opacity:.7"></i>
@@ -1281,6 +1246,7 @@ const RP={
     const sc=localStorage.getItem('rp_active_char');
     if(sc){const c=S.chars.find(x=>x.id===sc);if(c){S.activeChar=c;S.activeChars=[c];UI.updChar(c);}}
     UI.renderRooms();UI.renderTags();
+    setTimeout(()=>QuickBar?.render(), 800); // Veriler yüklendikten sonra şeridi doldur
     const live=S.rooms.find(r=>r.slug==='live')||S.rooms[0];
     if(live)await RP.switchRoom(live.id);
     document.getElementById('view-rp').classList.add('active');
@@ -1363,6 +1329,8 @@ const RP={
     }
     try{
       const ref = await DB.post('rp_messages',pl);
+      // QuickBar: kullanılan karakteri/entity'yi kaydet
+      if(sendChar) QuickBar?.trackUse('Karakter', sendChar.name, sendChar.id, sendChar.image||null);
       // Auto-react: reply_to_id varsa ve MA'nın gönderdiği mesajsa tetikle
       if(window.MasterAgent && MasterAgent._autoEnabled !== false){
         const replyToId = pl.reply_to_id || null;
@@ -1741,14 +1709,14 @@ const RP={
     if(!url){toast('URL gir','warn');return;}
     S.attach=url;
     document.getElementById('attach-inline-bar')?.remove();
-    // Show preview chip in entity chips bar
-    const bar=document.getElementById('entity-chips');
+    // Show preview chip in quick entity bar
+    const bar=document.getElementById('quick-entity-bar');
     document.getElementById('attach-preview-tag')?.remove();
     const prev=document.createElement('div');
     prev.id='attach-preview-tag';
-    prev.style.cssText='display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:20px;border:1px solid rgba(77,184,128,.4);background:var(--gn-d);color:var(--gn);font-family:var(--mono);font-size:10px';
+    prev.style.cssText='display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:16px;border:1px solid rgba(77,184,128,.4);background:var(--gn-d);color:var(--gn);font-family:var(--mono);font-size:10px;flex-shrink:0';
     prev.innerHTML=`<i class="fas fa-image" style="font-size:9px"></i><span>resim eklendi</span><span style="cursor:pointer;opacity:.7" onclick="S.attach=null;this.parentNode.remove()">✕</span>`;
-    bar.insertBefore(prev,bar.querySelector('#add-char-btn'));
+    if(bar) bar.appendChild(prev);
     toast('Resim eklendi','success');
   },
   confirmAttach(){this._confirmAttachInline();},
@@ -2448,55 +2416,12 @@ const UI={
     if(og) og.textContent=cnt?`${cnt} karakter sahnede`:'tıkla → ekle / çıkar';
   },
   renderTags(){
-    const bar=document.getElementById('entity-chips');if(!bar)return;
-    bar.innerHTML='';
-    // Sidebar sayaç güncelle
-    {const cnt=S.activeChars?.length||0;const og=document.getElementById('ac-org');if(og)og.textContent=cnt?`${cnt} karakter sahnede`:'tıkla → ekle / çıkar';}
-    S.activeChars.forEach(c=>{
-      const org=RP._org((c.organizations||[])[0]||c.organization);
-      const isP=S.activeChar?.id===c.id;
-      const orgColor=org?.color||'#4a8fe2';
-      const ini=(c.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-      const tag=document.createElement('div');
-      tag.className='ctag'+(isP?' ptag':'');
-      if(!isP)tag.style.cssText=`background:${orgColor}18;border-color:${orgColor}44;color:${orgColor};`;
-      tag.title=`Tıkla → **${c.name}:** ekler  |  Sağ tık → Profil / Etiket / Sahneden Çıkar`;
-      tag.innerHTML=`<div class="ctag-ava">${c.image?`<img src="${c.image}" onerror="this.parentNode.innerHTML='${ini}'" loading="lazy">`:ini}</div><span class="ctag-name">${c.name}</span><span class="ctag-rm">✕</span>`;
-      tag.addEventListener('click',e=>{
-        if(e.target.classList.contains('ctag-rm'))return;
-        const inp=document.getElementById('msg-input');
-        // Tık → "**İsim:** " bold markdown prefix ekle
-        const val=inp.value;const prefix=`**${c.name}:** `;
-        inp.value=(val===''||val.endsWith('\n'))?val+prefix:val+'\n'+prefix;
-        inp.focus();inp.style.height='auto';inp.style.height=Math.min(inp.scrollHeight,160)+'px';
-        inp.selectionStart=inp.selectionEnd=inp.value.length;
-        // EntityBar search paneli açıksa kapat — chip ve # aynı sistem
-        if(window.EntityBar)EntityBar.closeSearch();
-      });
-      tag.addEventListener('contextmenu',e=>{
-        e.preventDefault();
-        if(window.ContextMenu){
-          ContextMenu.show(e.clientX,e.clientY,[
-            {icon:'fa-id-card',label:'Profil Kartı',action:()=>CharCard.show(c.id,e.clientX,e.clientY,'char')},
-            {icon:'fa-star',label:'Primary Yap',action:()=>RP.setPrimary(c.id)},
-            {icon:'fa-hashtag',label:'[Etiket] Ekle',action:()=>{
-              const inp=document.getElementById('msg-input');
-              const t=`[Karakter:${c.name}]`;
-              const cur=inp.selectionStart||inp.value.length;
-              const before=inp.value.slice(0,cur);const after=inp.value.slice(cur);
-              inp.value=before+(before&&!before.endsWith(' ')?' ':'')+t+' '+after;
-              inp.focus();
-            }},
-            {icon:'fa-times',label:'Sahneden Çıkar',action:()=>RP.removeChar(c.id)},
-          ]);
-        } else { RP.setPrimary(c.id); }
-      });
-      tag.querySelector('.ctag-rm').addEventListener('click',e=>{e.stopPropagation();RP.removeChar(c.id);});
-      bar.appendChild(tag);
-    });
-    // Karakter ekle butonu
-    const ab=document.createElement('button');ab.id='add-char-btn';ab.innerHTML='<i class="fas fa-plus"></i>';ab.title='Karakter ekle';ab.onclick=()=>RP.openPicker();
-    bar.appendChild(ab);
+    // Artık QuickBar şeridini render et
+    if(window.QuickBar) QuickBar.render();
+    // Sidebar karakter sayacını güncelle
+    const cnt=S.activeChars?.length||0;
+    const og=document.getElementById('ac-org');
+    if(og) og.textContent=cnt?`${cnt} karakter sahnede`:'tıkla → ekle / çıkar';
   },
   updateTxt(id,txt,edited){
     const el=document.querySelector(`[data-msg-id="${id}"]`);if(!el)return;
@@ -3634,116 +3559,129 @@ const Autocomplete = {
 window.Autocomplete = Autocomplete;
 
 /* ═══ ENTITY BAR (unified entity picker above input) ══════ */
-const EntityBar = {
-  _type: 'Karakter',
-  _open: false,
+/* ═══ QUICK ENTITY BAR ══════════════════════════════════
+   Chat header altında hızlı etiket şeridi.
+   Sıralama: Son kullanılan → Favori karakter → Tüm karakterler (ilk N)
+             → Araçlar (ilk N) → Mülkler (ilk N)
+   localStorage key: 'qb_recent'  → [{type,name,id,img?}]  max 12
+════════════════════════════════════════════════════════ */
+const QuickBar = {
+  _LS: 'qb_recent',
+  _MAX: 12,
 
-  // Entity type sources (same as Autocomplete._TYPES)
-  _TYPES: [
-    { label:'Karakter', key:'Karakter', icon:'user',     color:'#c084fc', src:()=>(S.chars||[]).map(c=>({name:c.name,sub:c.alias||'',id:c.id,img:c.image||null})) },
-    { label:'Araç',     key:'Araç',     icon:'car',      color:'#e8a74a', src:()=>(S._db?.vehicles||[]).map(v=>({name:v.name||v.model||v.plate,sub:v.plate||'',id:v.id,img:null})) },
-    { label:'Org',      key:'Org',      icon:'building', color:'#4a8fe2', src:()=>(S.orgs||[]).map(o=>({name:o.name,sub:o.type||'',id:o.id,img:o.image||null})) },
-    { label:'Mülk',     key:'Mülk',     icon:'home',     color:'#9b6fd4', src:()=>(S._db?.properties||[]).map(p=>({name:p.name,sub:p.address||'',id:p.id,img:null})) },
-    { label:'Ekipman',  key:'Ekipman',  icon:'box',      color:'#4db880', src:()=>(S._db?.equipments||[]).map(q=>({name:q.name,sub:q.type||'',id:q.id,img:null})) },
-  ],
+  // Entity türlerine ait renk ve etiket bilgisi
+  _META: {
+    'Karakter': { color:'#c084fc', icon:'👤', label:'Karakter' },
+    'Araç':     { color:'#e8a74a', icon:'🚗', label:'Araç' },
+    'Mülk':     { color:'#9b6fd4', icon:'🏠', label:'Mülk' },
+    'Org':      { color:'#4a8fe2', icon:'🏢', label:'Org' },
+    'Ekipman':  { color:'#4db880', icon:'📦', label:'Ekipman' },
+  },
 
-  toggleSearch() {
-    const bar = document.getElementById('entity-search-bar');
+  // Son kullanılanları localStorage'dan oku
+  _getRecent() {
+    try { return JSON.parse(localStorage.getItem(this._LS) || '[]'); }
+    catch(e) { return []; }
+  },
+
+  // Kullanılan entity'yi en başa taşı/ekle
+  trackUse(type, name, id, img) {
+    let arr = this._getRecent();
+    arr = arr.filter(x => !(x.type === type && x.id === id));
+    arr.unshift({ type, name, id: id || name, img: img || null });
+    if (arr.length > this._MAX) arr = arr.slice(0, this._MAX);
+    try { localStorage.setItem(this._LS, JSON.stringify(arr)); } catch(e) {}
+    this.render();
+  },
+
+  // Şeridi render et
+  render() {
+    const bar = document.getElementById('quick-entity-bar');
     if (!bar) return;
-    this._open = !this._open;
-    bar.style.display = this._open ? 'flex' : 'none';
-    const btn = document.getElementById('entity-tag-btn');
-    if (btn) btn.classList.toggle('active', this._open);
-    if (this._open) {
-      const inp = document.getElementById('es-inp');
-      if (inp) { inp.value = ''; inp.focus(); }
-      this.search('');
-    }
-  },
 
-  closeSearch() {
-    const bar = document.getElementById('entity-search-bar');
-    if (bar) bar.style.display = 'none';
-    this._open = false;
-    const btn = document.getElementById('entity-tag-btn');
-    if (btn) btn.classList.remove('active');
-  },
+    const recent = this._getRecent();
 
-  setType(type, btn) {
-    this._type = type;
-    document.querySelectorAll('.es-type').forEach(b => b.classList.remove('active'));
-    if (btn) btn.classList.add('active');
-    const inp = document.getElementById('es-inp');
-    this.search(inp ? inp.value : '');
-  },
+    // Tüm entity kaynaklarından derleme
+    const chars    = (S.chars || []).slice(0, 8).map(c => ({ type:'Karakter', name:c.name, id:c.id, img:c.image||null }));
+    const vehicles = (S._db?.vehicles || []).slice(0, 5).map(v => ({ type:'Araç', name:v.name||v.model||v.plate, id:v.id, img:null }));
+    const props    = (S._db?.properties || []).slice(0, 5).map(p => ({ type:'Mülk', name:p.name, id:p.id, img:null }));
 
-  search(q) {
-    const typeObj = this._TYPES.find(t => t.key === this._type) || this._TYPES[0];
-    const color = typeObj.color;
-    let items = typeObj.src();
-    const qL = (q || '').toLowerCase().trim();
-    if (qL) {
-      items = items.filter(it => it.name && it.name.toLowerCase().includes(qL));
+    // Birleştir: önce son kullanılanlar, sonra geri kalanlar (duplicate yok)
+    const recentKeys = new Set(recent.map(x => x.type + '|' + x.id));
+    const rest = [...chars, ...vehicles, ...props].filter(x => !recentKeys.has(x.type + '|' + x.id));
+    const all = [...recent, ...rest];
+
+    if (!all.length) { bar.style.display = 'none'; return; }
+    bar.style.display = 'flex';
+
+    bar.innerHTML = '';
+
+    // "Son" etiketi
+    if (recent.length) {
+      const lbl = document.createElement('span');
+      lbl.className = 'qe-label';
+      lbl.textContent = 'Son';
+      bar.appendChild(lbl);
     }
-    // Sort: prefix matches first, then alphabetical
-    if (qL) {
-      items.sort((a, b) => {
-        const aP = a.name.toLowerCase().startsWith(qL) ? 0 : 1;
-        const bP = b.name.toLowerCase().startsWith(qL) ? 0 : 1;
-        return aP - bP || a.name.localeCompare(b.name, 'tr');
-      });
-    }
-    items = items.slice(0, 20);
-    const res = document.getElementById('es-results');
-    if (!res) return;
-    if (!items.length) {
-      res.innerHTML = `<div style="color:var(--t2);font-size:11px;padding:6px 2px">${qL ? 'Sonuç yok' : 'Veri yükleniyor...'}</div>`;
-      return;
-    }
-    res.innerHTML = items.map(it => {
-      const ini = (it.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-      const ava = it.img
-        ? `<img src="${it.img}" style="width:100%;height:100%;border-radius:50%;object-fit:cover" onerror="this.parentNode.textContent='${ini}'">`
+
+    let prevType = recent.length ? 'recent' : null;
+
+    all.forEach((item, idx) => {
+      // Separatör — recent bitti, diğerleri başlıyor
+      if (idx === recent.length && recent.length > 0 && rest.length > 0) {
+        const sep = document.createElement('div');
+        sep.className = 'qe-sep';
+        bar.appendChild(sep);
+        const lbl = document.createElement('span');
+        lbl.className = 'qe-label';
+        lbl.textContent = 'Diğer';
+        bar.appendChild(lbl);
+        prevType = 'other';
+      }
+
+      const meta = this._META[item.type] || { color:'#888', icon:'#' };
+      const ini = (item.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+
+      const chip = document.createElement('div');
+      chip.className = 'qe-chip';
+      chip.style.cssText = `background:${meta.color}18;border-color:${meta.color}44;color:${meta.color}`;
+      chip.title = `${item.type}: ${item.name}  (tıkla → mesaja ekle)`;
+
+      const ava = item.img
+        ? `<img src="${item.img}" style="width:100%;height:100%;border-radius:50%;object-fit:cover" onerror="this.textContent='${ini}'" loading="lazy">`
         : ini;
-      return `<div class="es-result" onclick="EntityBar.insert('${it.name.replace(/'/g,"\\'")}',event)" style="border-color:${color}33">
-        <div class="es-result-ava" style="background:${color}22;color:${color};border:1px solid ${color}44">${ava}</div>
-        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.name}</span>
-        ${it.sub ? `<span style="color:var(--t2);font-size:10px;flex-shrink:0">${it.sub}</span>` : ''}
-      </div>`;
-    }).join('');
-  },
 
-  insert(name, e) {
-    const typeKey = this._type;
-    const inp = document.getElementById('msg-input');
-    if (inp) {
-      if (typeKey === 'Karakter') {
-        // Karakter seçince chip gibi bold prefix ekle — aynı sistem
-        const val = inp.value;
-        const prefix = `**${name}:** `;
-        inp.value = (val === '' || val.endsWith('\n')) ? val + prefix : val + '\n' + prefix;
+      chip.innerHTML = `<div class="qe-chip-ava" style="background:${meta.color}28;color:${meta.color}">${ava}</div>${item.name}`;
+
+      chip.addEventListener('click', () => {
+        const inp = document.getElementById('msg-input');
+        if (!inp) return;
+        if (item.type === 'Karakter') {
+          // Karakter → **Ad:** prefix
+          const val = inp.value;
+          const prefix = `**${item.name}:** `;
+          inp.value = (val === '' || val.endsWith('\n')) ? val + prefix : val + '\n' + prefix;
+        } else {
+          // Diğer → [Tip:Ad] etiketi
+          const tag = `[${item.type}:${item.name}]`;
+          const cur = inp.selectionStart || inp.value.length;
+          const before = inp.value.slice(0, cur);
+          const after = inp.value.slice(cur);
+          inp.value = before + (before && !before.endsWith(' ') ? ' ' : '') + tag + ' ' + after;
+        }
         inp.focus();
         inp.style.height = 'auto';
         inp.style.height = Math.min(inp.scrollHeight, 160) + 'px';
         inp.selectionStart = inp.selectionEnd = inp.value.length;
-      } else {
-        // Diğer tipler → [Type:Name] etiketi ekle
-        const tag = `[${typeKey}:${name}]`;
-        const cur = inp.selectionStart || inp.value.length;
-        const before = inp.value.slice(0, cur);
-        const after = inp.value.slice(cur);
-        inp.value = before + (before && !before.endsWith(' ') ? ' ' : '') + tag + ' ' + after;
-        inp.focus();
-        const pos = before.length + (before && !before.endsWith(' ') ? 1 : 0) + tag.length + 1;
-        inp.setSelectionRange(pos, pos);
-        inp.style.height = 'auto';
-        inp.style.height = Math.min(inp.scrollHeight, 160) + 'px';
-      }
-    }
-    this.closeSearch();
+        // Kullanımı kaydet
+        QuickBar.trackUse(item.type, item.name, item.id, item.img);
+      });
+
+      bar.appendChild(chip);
+    });
   },
 };
-window.EntityBar = EntityBar;
+window.QuickBar = QuickBar;
 
 /* ═══ EVENT WIRING ═══════════════════════════════════════ */
 function _wireInput(){
