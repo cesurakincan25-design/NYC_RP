@@ -26,7 +26,7 @@ const DM_CFG = new Proxy({}, {
 });
 
 const DM = {
-  get GEM_MODEL()        { return window.DM_CONFIG?.geminiModel       || 'gemini-2.5-flash'; },
+  get GEM_MODEL()        { return window.DM_CONFIG?.geminiModel       || 'gemini-3.6-flash'; },
   get WORLD()            { return window.DM_CONFIG?.world             || 'nyc'; },
   get WORLD_NAME()       { return window.DM_CONFIG?.worldName         || 'NYC'; },
   get DB_TABLE()         { return window.DM_CONFIG?.dbTable           || 'nyc_db'; },
