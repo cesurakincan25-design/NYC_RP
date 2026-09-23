@@ -2090,15 +2090,18 @@ const RT={
         let changed=false;
         snap.docChanges().forEach(change=>{
           const data={...change.doc.data(),id:change.doc.id};
+          const sid=String(data.id);
           if(change.type==='added'){
-            if(!S.rooms.find(r=>r.id==data.id)){S.rooms.push(data);changed=true;}
+            if(!S.rooms.find(r=>String(r.id)===sid)){S.rooms.push(data);changed=true;}
           }
           if(change.type==='modified'){
-            const idx=S.rooms.findIndex(r=>r.id==data.id);
+            const idx=S.rooms.findIndex(r=>String(r.id)===sid);
             if(idx>=0){S.rooms[idx]={...S.rooms[idx],...data};changed=true;}
           }
           if(change.type==='removed'){
-            S.rooms=S.rooms.filter(r=>r.id!=data.id);changed=true;
+            const before=S.rooms.length;
+            S.rooms=S.rooms.filter(r=>String(r.id)!==sid);
+            if(S.rooms.length!==before)changed=true;
           }
         });
         if(changed) UI.renderRooms();
@@ -5144,7 +5147,6 @@ Login._start=async function(u){
 #dm-header{height:var(--hh);background:var(--bg1);border-bottom:1px solid var(--ln);display:flex;align-items:center;gap:12px;padding:0 20px;flex-shrink:0}
 .dm-brand{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.15em;color:var(--t2);text-transform:uppercase}
 .dm-brand em{color:var(--pu);font-style:normal}
-#dm-grid{display:grid;grid-template-columns:260px 1fr 300px;flex:1;overflow:hidden}
 .dm-col{background:var(--bg1);border-right:1px solid var(--ln);display:flex;flex-direction:column;overflow:hidden}
 .dm-col:last-child{border-right:none}
 .dm-col-head{height:40px;padding:0 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--ln);flex-shrink:0}
@@ -5201,13 +5203,7 @@ Login._start=async function(u){
 .dm-read-pill:hover{background:var(--bg3);color:var(--t1)}
 .dm-read-pill.reading{color:var(--pu);border-color:rgba(155,111,212,.3);background:rgba(155,111,212,.1)}
 .dm-read-pill.ready{color:var(--gn);border-color:rgba(77,184,128,.3);background:var(--gn-d)}
-@media(max-width:768px){#dm-grid .dm-col:first-child,#dm-grid .dm-col:last-child{display:none}}
-/* DM tabs */
-.dm-tabs{display:flex;gap:3px;background:var(--bg0);border-radius:8px;padding:3px}
-.dm-tab{background:none;border:none;color:var(--t3);font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:4px 10px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:5px;transition:all .15s}
-.dm-tab:hover{color:var(--t1);background:var(--bg2)}
-.dm-tab.active{color:var(--pu);background:rgba(155,111,212,.15);border:1px solid rgba(155,111,212,.25)}
-.dm-tab-content{display:flex;flex:1;overflow:hidden}
+@media(max-width:768px){#dm-ma .dm-col:first-child{display:none}}
 /* Master Agent chat */
 #dm-ma{background:var(--bg0)}
 .ma-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;flex:1;color:var(--t3);text-align:center;padding:32px}
@@ -5234,72 +5230,11 @@ Login._start=async function(u){
     <div class="adm-sep"></div>
     <span style="font-family:var(--mono);font-size:10px;color:var(--t3)" id="dm-ctx-count" title="MA'nın gönderdiği mesaj sayısı">MA mesajları: 0</span>
     <div class="adm-spc"></div>
-    <!-- Tab buttons -->
-    <div class="dm-tabs">
-      <button class="dm-tab active" id="dm-tab-ma" onclick="DMPanel.switchTab('ma')">
-        <i class="fas fa-robot"></i> Master Agent
-      </button>
-      <button class="dm-tab" id="dm-tab-panel" onclick="DMPanel.switchTab('panel')">
-        <i class="fas fa-sliders-h"></i> DM Araçları
-      </button>
-    </div>
-    <div class="adm-sep"></div>
-    <button class="adm-btn" style="border-color:rgba(155,111,212,.4);background:rgba(155,111,212,.1);color:var(--pu)" onclick="MAPanel.loadMAChars()">
-      <i class="fas fa-sync-alt"></i> MA Karakterler
-    </button>
-    <button class="adm-btn" style="border-color:rgba(155,111,212,.4);background:rgba(155,111,212,.1);color:var(--pu)" id="dm-read-btn" onclick="DMPanel.readNow()">
-      <i class="fas fa-book-open"></i> DM Oku
-    </button>
     <button class="adm-btn" onclick="DMPanel.close()"><i class="fas fa-arrow-left"></i> RP'ye Dön</button>
   </div>
 
-  <!-- ── DM Panel tab (araçlar) ── -->
-  <div id="dm-grid" class="dm-tab-content" style="display:none">
-    <!-- LEFT: NPCs -->
-    <div class="dm-col">
-      <div class="dm-col-head">
-        <span class="dm-col-title">NPC Karakterler</span>
-        <button onclick="DMPanel.openCreateNPC()" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:11px;display:flex;align-items:center;gap:3px"><i class="fas fa-plus"></i><span style="font-family:var(--mono);font-size:9px">YENİ</span></button>
-      </div>
-      <div class="dm-body" id="dm-npc-list">
-        <div class="empty"><i class="fas fa-user-secret"></i><p>NPC yükleniyor…</p></div>
-      </div>
-    </div>
-
-    <!-- CENTER: Queue (pending events + dispatches) -->
-    <div class="dm-col" style="background:var(--bg0)">
-      <div class="dm-col-head">
-        <span class="dm-col-title">Onay Kuyruğu</span>
-        <span id="dm-queue-count" style="font-family:var(--mono);font-size:9px;color:var(--t3)">0 bekliyor</span>
-      </div>
-
-      <!-- Generate actions -->
-      <div style="padding:10px 12px;border-bottom:1px solid var(--ln);background:var(--bg1);flex-shrink:0">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-          <button class="dm-btn amber" onclick="DMPanel.openGenerateEvent()"><i class="fas fa-globe"></i> Dünya Olayı</button>
-          <button class="dm-btn purple" onclick="DMPanel.openGenerateDispatch()"><i class="fas fa-radio"></i> Dispatch</button>
-        </div>
-      </div>
-
-      <div style="flex:1;overflow-y:auto" id="dm-queue-list">
-        <div class="empty"><i class="fas fa-inbox"></i><p>Kuyruk boş</p></div>
-      </div>
-    </div>
-
-    <!-- RIGHT: Context window -->
-    <div class="dm-col">
-      <div class="dm-col-head">
-        <span class="dm-col-title">AI Bağlamı</span>
-        <button onclick="DMPanel.clearContext()" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:10px;font-family:var(--mono)">temizle</button>
-      </div>
-      <div class="dm-body" id="dm-ctx-list">
-        <div class="empty"><i class="fas fa-brain"></i><p>Henüz okunmadı</p></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── Master Agent tab (varsayılan) ── -->
-  <div id="dm-ma" class="dm-tab-content" style="flex:1;flex-direction:row;overflow:hidden">
+  <!-- ── Master Agent ── -->
+  <div id="dm-ma" style="flex:1;display:flex;flex-direction:row;overflow:hidden">
 
     <!-- LEFT: MA Characters panel -->
     <div class="dm-col" style="width:260px;flex-shrink:0">
@@ -5536,67 +5471,26 @@ window.DM_CONFIG = {
 
 <script>
 /* ════════════════════════════════════════════════════════
-   DM PANEL — UI controller for the #view-dm panel
-   (tab switching, close, NPC modal delegates, DM engine bridge)
+   MA PANEL — override/extend dm_panel.js DMPanel with
+   close/open for the full-screen MA view, plus modal stubs.
 ════════════════════════════════════════════════════════ */
-const DMPanel = {
-  /* ── Tab switch: 'ma' | 'panel' ── */
-  switchTab(tab) {
-    const maEl    = document.getElementById('dm-ma');
-    const gridEl  = document.getElementById('dm-grid');
-    const btnMA   = document.getElementById('dm-tab-ma');
-    const btnPanel= document.getElementById('dm-tab-panel');
-    if (!maEl || !gridEl) return;
-    if (tab === 'ma') {
-      maEl.style.display   = 'flex';
-      gridEl.style.display = 'none';
-      btnMA?.classList.add('active');
-      btnPanel?.classList.remove('active');
-      // Lazy-load MA char list on first open
-      if (window.MAPanel && !MAPanel._chars?.length) MAPanel.loadMAChars();
-    } else {
-      maEl.style.display   = 'none';
-      gridEl.style.display = 'grid';
-      btnMA?.classList.remove('active');
-      btnPanel?.classList.add('active');
-      // Populate NPC list when switching to DM tools
-      if (window.DMEngine?.getNPCs) this._populateNPCList();
-    }
-  },
-
-  /* ── Close DM panel → back to RP ── */
+// dm_panel.js may have already declared DMPanel — extend it
+if (typeof DMPanel === 'undefined') window.DMPanel = {};
+Object.assign(window.DMPanel, {
+  /* ── Close MA panel → back to RP ── */
   close() {
-    document.getElementById('view-dm').style.display  = 'none';
-    document.getElementById('view-rp').style.display  = 'flex';
+    document.getElementById('view-dm').style.display = 'none';
+    document.getElementById('view-rp').style.display = 'flex';
   },
 
-  /* ── Open DM panel ── */
+  /* ── Open MA panel (full-screen) ── */
   open() {
-    document.getElementById('view-rp').style.display  = 'none';
-    document.getElementById('view-dm').style.display  = 'flex';
-    // ensure MA tab is visible by default
-    this.switchTab('ma');
+    document.getElementById('view-rp').style.display = 'none';
+    document.getElementById('view-dm').style.display = 'flex';
     if (window.MAPanel && !MAPanel._chars?.length) MAPanel.loadMAChars();
   },
 
-  /* ── Read DM context (delegates to DMEngine if available) ── */
-  async readNow() {
-    if (window.DMEngine?.readNow) {
-      const btn = document.getElementById('dm-read-btn');
-      if (btn) { btn.disabled = true; }
-      try { await DMEngine.readNow(); toast('DM bağlamı güncellendi', 'success'); }
-      catch(e) { toast('DM okuma hatası: ' + e.message, 'error'); }
-      finally { if (btn) btn.disabled = false; }
-    } else {
-      toast('DM Engine aktif değil', 'warn');
-    }
-  },
-
-  /* ── NPC modal (quick-trigger for existing chars) ── */
-  openCreateNPC() {
-    OM('m-create-npc');
-  },
-
+  /* ── Modal action stubs (triggered from modal buttons) ── */
   triggerNPC() {
     const sel = document.getElementById('npc-trigger-select');
     const charId = sel?.value;
@@ -5605,20 +5499,17 @@ const DMPanel = {
     if (!char) return;
     MasterAgent.send(`"${char.name}" karakterini oyna. Sahneye uygun kısa bir mesaj yaz ve SEND_MSG ile gönder. char_id:"${charId}"`);
     CM('m-npc-trigger');
-    DMPanel.switchTab('ma');
-  },
-
-  /* ── Generate Event / Dispatch ── */
-  openGenerateEvent() {
-    OM('m-gen-event');
   },
 
   async generateEvent() {
     const txt = document.getElementById('gen-event-prompt')?.value?.trim();
     if (!txt) { toast('Prompt yaz', 'warn'); return; }
     CM('m-gen-event');
-    DMPanel.switchTab('ma');
     await MasterAgent.send(`Dünya olayı yaz ve SEND_MSG ile gönder. Tema: ${txt}`);
+  },
+
+  openGenerateEvent() {
+    OM('m-gen-event');
   },
 
   openGenerateDispatch(prefix) {
@@ -5633,41 +5524,19 @@ const DMPanel = {
     const txt = document.getElementById('gen-dispatch-prompt')?.value?.trim();
     if (!txt) { toast('Dispatch içeriği yaz', 'warn'); return; }
     CM('m-gen-dispatch');
-    DMPanel.switchTab('ma');
     await MasterAgent.send(`Polis/acil servis dispatch mesajı yaz ve SEND_MSG ile gönder. İçerik: ${txt}`);
   },
 
-  /* ── Context box ── */
-  clearContext() {
-    const el = document.getElementById('dm-context-list');
-    if (el) el.innerHTML = '<div class="empty" style="padding:20px;font-size:11px;color:var(--t3)">Context temizlendi.</div>';
-    if (window.DMEngine?.clearContext) DMEngine.clearContext();
+  async createNPC() {
+    const name = document.getElementById('npc-create-name')?.value?.trim();
+    const desc  = document.getElementById('npc-create-desc')?.value?.trim();
+    const room  = document.getElementById('npc-create-room')?.value;
+    if (!name) { toast('İsim gir', 'warn'); return; }
+    CM('m-create-npc');
+    const prompt = `Yeni bir NPC yarat ve sahneye çıkar. İsim: "${name}". ${desc ? 'Açıklama: ' + desc : ''} ${room ? 'Oda: ' + room : ''} SAVE_NPC kullan, sonra SEND_MSG ile sahneye çıkar.`;
+    await MasterAgent.send(prompt);
   },
-
-  /* ── NPC list (DM tools tab) ── */
-  _populateNPCList() {
-    const el = document.getElementById('dm-npc-list');
-    if (!el) return;
-    const chars = S.chars?.filter(c => c.tags?.includes('npc') || c.is_npc) || [];
-    if (!chars.length) { el.innerHTML = '<div class="empty" style="padding:20px;font-size:11px;color:var(--t3)">NPC bulunamadı.</div>'; return; }
-    el.innerHTML = chars.slice(0, 30).map(c => `
-      <div class="npc-item">
-        <div class="npc-ava">${c.image ? `<img src="${c.image}">` : (c.name||'?')[0].toUpperCase()}</div>
-        <div class="npc-inf">
-          <div class="npc-nm">${c.name||'?'}</div>
-          <div class="npc-sub">${c.occupation||c.role||'NPC'}</div>
-        </div>
-        <button class="npc-play-btn" onclick="DMPanel._playNPC('${c.id}','${(c.name||'').replace(/'/g,"\\'")}')">Oyna</button>
-      </div>`).join('');
-  },
-
-  _playNPC(charId, charName) {
-    MasterAgent.send(`"${charName}" (char_id:"${charId}") karakterini oyna. Sahneye uygun kısa bir mesaj gönder.`);
-    DMPanel.switchTab('ma');
-  },
-};
-
-window.DMPanel = DMPanel;
+});
 
 /* ════════════════════════════════════════════════════════
    MASTER AGENT  — NYC_RP Orchestrator
@@ -5802,6 +5671,37 @@ const MasterAgent = {
       '  → Yeni bir mülk/lokasyon veritabanına (properties tablosu) kaydeder.',
       '  → type: Ev, Daire, Depo, İşyeri, Arsa, Garaj vb.',
       '',
+      'QUERY_DB:{"table":"TABLO","filter":"ALAN=eq.DEĞER","select":"alan1,alan2","order":"alan.asc","limit":20}',
+      '  → Veritabanından kayıt okur. Desteklenen tablolar:',
+      '     characters       → tüm karakterler (name, alias, occupation, status, org_id, backstory, vb.)',
+      '     vehicles         → araçlar (plate, model, color, owner_name, owner_id, mods, vb.)',
+      '     properties       → mülkler/lokasyonlar (name, type, address, owner_name, vb.)',
+      '     incidents        → olaylar (title, incident_type, severity, description, vb.)',
+      '     rp_rooms         → odalar (name, slug, is_archived)',
+      '     rp_messages      → mesajlar (char_name, content, room_id, created_at)',
+      '     organizations    → örgütler (name, type, description, vb.)',
+      '     character_memories → karakter anıları (char_name, memory_type, content, importance)',
+      '     relationship_changes → ilişki değişimleri',
+      '     ai_summaries     → AI özet kayıtları',
+      '  → ÖRNEK: Bir karakterin araçlarını bul:',
+      '     QUERY_DB:{"table":"vehicles","filter":"owner_id=eq.CHAR_ID","limit":10}',
+      '  → ÖRNEK: Aktif olmayan karakterleri listele:',
+      '     QUERY_DB:{"table":"characters","filter":"status=eq.Deceased","limit":20}',
+      '  → ÖRNEK: Son olayları listele:',
+      '     QUERY_DB:{"table":"incidents","order":"created_at.desc","limit":10}',
+      '  → filter Supabase PostgREST formatını kullanır: alan=eq.DEĞER, alan=ilike.*METIN*, alan=gt.SAYI',
+      '',
+      'UPDATE_DB:{"table":"TABLO","id":"KAYIT_ID","data":{"alan":"yeni_değer"}}',
+      '  → Veritabanındaki bir kaydı günceller.',
+      '  → ÖRNEK: Karakter statüsünü güncelle:',
+      '     UPDATE_DB:{"table":"characters","id":"char_123","data":{"status":"Deceased","notes":"Rakipler tarafından öldürüldü"}}',
+      '  → ÖRNEK: Araç notunu güncelle:',
+      '     UPDATE_DB:{"table":"vehicles","id":"veh_456","data":{"notes":"Yeni bilgi eklendi"}}',
+      '  ⚠️ ÖNEMLİ: UPDATE_DB komutu otomatik çalışmaz — sistem kullanıcıya onay kartı gösterir.',
+      '     Kullanıcı "Onayla" derse uygulanır, "İptal" derse işlem düşer.',
+      '     Bu yüzden UPDATE_DB\'yi sadece gerçekten gerekli olduğunda kullan ve',
+      '     önce kullanıcıya "şunu güncelleyeyim mi?" diye SOR, sonra UPDATE_DB yaz.',
+      '',
       'SET_TIME:22:30',
       '  → Aktif RP odasının saatini değiştirir. Formatlar:',
       '  SET_TIME:22:30          → saati 22:30\'a ayarla',
@@ -5860,6 +5760,14 @@ const MasterAgent = {
       '',
       '== DÜNYA DURUMU ==',
       worldSnap,
+      '',
+      '== VERİTABANI ERİŞİMİ ==',
+      'Aşağıdaki komutlarla NYC_DB veritabanını okuyup yazabilirsin:',
+      '  QUERY_DB → tablo okuma (characters, vehicles, properties, incidents, rp_rooms, organizations, character_memories, vb.)',
+      '  UPDATE_DB → kayıt güncelleme',
+      '  SAVE_NPC / SAVE_VEHICLE / SAVE_PROP → yeni kayıt oluşturma',
+      'Bir karakterin araçlarını, geçmişini, ilişkilerini, olaylardaki rolünü öğrenmek için QUERY_DB kullan.',
+      'Rol yönetimi kararları almadan önce ilgili verileri sorgula.',
       '',
       '== DM BAĞLAMI ==',
       dmCtx,
@@ -6066,6 +5974,74 @@ const MasterAgent = {
         results.push(`✅ Mülk kaydedildi → "${newProp.name}" (ID: ${newId})`);
       } catch (e) {
         results.push(`❌ SAVE_PROP hatası: ${e.message}`);
+      }
+    }
+
+    // QUERY_DB:{ JSON } — read any table from the database
+    // Supported: QUERY_DB:{"table":"vehicles","filter":"owner_name=eq.Marcus Webb","limit":20}
+    // Supported tables: characters, vehicles, properties, incidents, rp_rooms, rp_messages,
+    //   organizations, character_memories, relationship_changes, ai_summaries, rp_player_profiles
+    const queryDbMatches = [...text.matchAll(/QUERY_DB:(\{[\s\S]*?\})/g)];
+    for (const qm of queryDbMatches) {
+      try {
+        const p = JSON.parse(qm[1]);
+        const table = p.table || p.collection;
+        if (!table) { results.push('❌ QUERY_DB: table belirtilmedi'); continue; }
+        // Build query string
+        let qs = table + '?';
+        if (p.filter)  qs += p.filter + '&';
+        if (p.select)  qs += 'select=' + p.select + '&';
+        if (p.order)   qs += 'order=' + p.order + '&';
+        const limit = Math.min(parseInt(p.limit)||20, 100);
+        qs += 'limit=' + limit;
+        const rows = await DB.get(qs).catch(e => { throw new Error(e.message || String(e)); });
+        if (!rows || rows.length === 0) {
+          results.push(`📋 QUERY_DB [${table}]: Sonuç bulunamadı.`);
+        } else {
+          const preview = JSON.stringify(rows, null, 2);
+          results.push(`📋 QUERY_DB [${table}] (${rows.length} kayıt):\n${preview.slice(0, 3000)}${preview.length > 3000 ? '\n…(kısaltıldı)' : ''}`);
+        }
+      } catch(e) {
+        results.push(`❌ QUERY_DB hatası: ${e.message}`);
+      }
+    }
+
+    // UPDATE_DB:{ JSON } — update a record in any table (requires user confirmation)
+    // ÖRNEK: UPDATE_DB:{"table":"characters","id":"char_123","data":{"status":"Deceased"},"reason":"Rakipler tarafından öldürüldü"}
+    const updateDbMatches = [...text.matchAll(/UPDATE_DB:(\{[\s\S]*?\})/g)];
+    for (const um of updateDbMatches) {
+      try {
+        const p = JSON.parse(um[1]);
+        if (!p.table || !p.id || !p.data) { results.push('❌ UPDATE_DB: table, id ve data zorunlu'); continue; }
+        // Queue the update — show confirmation UI, execute only on user approval
+        const pendingId = 'upd_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+        MasterAgent._pendingUpdates = MasterAgent._pendingUpdates || {};
+        MasterAgent._pendingUpdates[pendingId] = p;
+        const dataPreview = Object.entries(p.data).map(([k,v])=>`${k}: "${v}"`).join(', ');
+        const reason = p.reason ? ` — Sebep: ${p.reason}` : '';
+        results.push(`⏳ UPDATE_DB onay bekleniyor [${pendingId}]\nTablo: ${p.table} | ID: ${p.id}\nDeğişiklik: ${dataPreview}${reason}`);
+        // Render confirmation buttons in MA sidebar
+        if (window.MASidebar) {
+          setTimeout(() => {
+            const confirmHtml = `<div style="background:rgba(255,180,0,.08);border:1px solid rgba(255,180,0,.3);border-radius:8px;padding:10px;margin:8px 0;font-size:12px">
+              <div style="color:#ffb400;font-weight:600;margin-bottom:6px">⚠️ Veritabanı Güncelleme Onayı</div>
+              <div style="color:#ccc;margin-bottom:4px"><b>Tablo:</b> ${p.table} &nbsp;|&nbsp; <b>ID:</b> ${p.id}</div>
+              <div style="color:#ccc;margin-bottom:4px"><b>Değişiklik:</b> ${dataPreview}</div>
+              ${p.reason ? `<div style="color:#aaa;margin-bottom:8px;font-style:italic">${p.reason}</div>` : ''}
+              <div style="display:flex;gap:8px;margin-top:8px">
+                <button onclick="MasterAgent._confirmUpdate('${pendingId}')" style="flex:1;padding:6px;background:rgba(100,220,100,.15);border:1px solid rgba(100,220,100,.4);color:#6dc;border-radius:6px;cursor:pointer;font-size:11px">✅ Onayla</button>
+                <button onclick="MasterAgent._cancelUpdate('${pendingId}')" style="flex:1;padding:6px;background:rgba(220,80,80,.1);border:1px solid rgba(220,80,80,.3);color:#e88;border-radius:6px;cursor:pointer;font-size:11px">❌ İptal</button>
+              </div>
+            </div>`;
+            const el = document.createElement('div');
+            el.innerHTML = confirmHtml;
+            el.dataset.pendingId = pendingId;
+            const feed = document.getElementById('ma-chat-feed');
+            if (feed) feed.appendChild(el);
+          }, 300);
+        }
+      } catch(e) {
+        results.push(`❌ UPDATE_DB hatası: ${e.message}`);
       }
     }
 
@@ -6570,6 +6546,40 @@ Değişiklik olmayan karakterleri listeye dahil ETME. Eğer hiç güncelleme yok
     this._log(`📦 Backup localStorage'a kaydedildi (son 5 backup tutulur).`, 'var(--t3)');
     if(btn) { btn.disabled=false; btn.innerHTML='<i class="fas fa-check"></i> Tamamlandı — Tekrar Çalıştır'; }
   }
+};
+
+/* ── Confirm / cancel pending UPDATE_DB operations ───── */
+MasterAgent._confirmUpdate = async function(pendingId) {
+  const p = MasterAgent._pendingUpdates?.[pendingId];
+  if (!p) return;
+  try {
+    await DB.patch(p.table, `id=eq.${p.id}`, p.data);
+    const dataPreview = Object.entries(p.data).map(([k,v])=>`${k}: "${v}"`).join(', ');
+    // Remove confirmation card
+    document.querySelectorAll(`[data-pending-id="${pendingId}"]`).forEach(el=>el.remove());
+    // Notify MA about the result
+    MasterAgent._history.push({role:'user', parts:[{text:`[SİSTEM] UPDATE_DB onaylandı ve uygulandı → ${p.table} id:${p.id} | ${dataPreview}`}]});
+    MasterAgent._history.push({role:'model', parts:[{text:`✅ Güncelleme uygulandı.`}]});
+    if (window.MASidebar) MASidebar._appendMsg(`✅ Güncelleme uygulandı: ${p.table} → ${dataPreview}`, 'system');
+    delete MasterAgent._pendingUpdates[pendingId];
+    toast('Güncelleme uygulandı', 'success');
+    // Refresh in-memory S.chars if characters table updated
+    if (p.table === 'characters') {
+      const idx = (S.chars||[]).findIndex(c=>String(c.id)===String(p.id));
+      if (idx !== -1) Object.assign(S.chars[idx], p.data);
+    }
+  } catch(e) {
+    toast('Güncelleme hatası: ' + e.message, 'error');
+  }
+};
+
+MasterAgent._cancelUpdate = function(pendingId) {
+  document.querySelectorAll(`[data-pending-id="${pendingId}"]`).forEach(el=>el.remove());
+  MasterAgent._history.push({role:'user', parts:[{text:`[SİSTEM] UPDATE_DB iptal edildi → pending id: ${pendingId}`}]});
+  MasterAgent._history.push({role:'model', parts:[{text:`Anladım, güncelleme iptal edildi.`}]});
+  if (window.MASidebar) MASidebar._appendMsg(`❌ Güncelleme iptal edildi.`, 'system');
+  delete (MasterAgent._pendingUpdates||{})[pendingId];
+  toast('Güncelleme iptal edildi', 'warn');
 };
 
 window.MasterAgent = MasterAgent;
