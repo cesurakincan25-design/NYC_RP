@@ -3163,51 +3163,66 @@ const Autocomplete = {
     this._inp = inp;
     const val = inp.value;
     const cur = inp.selectionStart;
-    // Son [ karakterinden imlece kadar olan parça
     const before = val.slice(0, cur);
-    const m = before.match(/\[([A-Za-zÇĞİÖŞÜçğışöü]*)(?::([^[\]]*))?$/);
-    if (!m) { this.hide(); return; }
 
-    const typePart = m[1] || '';    // "Araç" veya "Fer" vs.
-    const namePart = m[2];          // undefined = henüz : yok, string = sonrası
+    // --- Mod 1: [Tip:isim] formatı hâlâ destekleniyor ---
+    const bracketM = before.match(/\[([A-Za-zÇĞİÖŞÜçğışöü]*)(?::([^[\]]*))?$/);
+    if (bracketM) {
+      const typePart = bracketM[1] || '';
+      const namePart = bracketM[2];
+      this._triggerStart = before.lastIndexOf('[');
 
-    this._triggerStart = before.lastIndexOf('[');
-
-    if (namePart === undefined) {
-      // Henüz ":" yazılmamış — tip listesi göster
-      const filtered = this._TYPES.filter(t =>
-        !typePart || t.label.toLowerCase().startsWith(typePart.toLowerCase())
-      );
-      if (!filtered.length) { this.hide(); return; }
-      this._items = filtered.map(t => ({
-        text: t.label,
-        sub: '',
-        icon: t.icon,
-        color: t.color,
-        insert: `[${t.label}:`,
-        replaceLen: before.length - this._triggerStart,
-        moveCursorTo: null,
-      }));
-    } else {
-      // ":" var, tip belli — isim ara
-      const typeDef = this._TYPES.find(t => t.label.toLowerCase() === typePart.toLowerCase());
-      if (!typeDef) { this.hide(); return; }
-      const q = namePart.toLowerCase();
-      const results = typeDef.src()
-        .filter(e => e.name && e.name.toLowerCase().includes(q))
-        .slice(0, 8);
-      if (!results.length) { this.hide(); return; }
-      this._items = results.map(e => ({
-        text: e.name,
-        sub: e.sub,
-        icon: typeDef.icon,
-        color: typeDef.color,
-        insert: `[${typeDef.label}:${e.name}]`,
-        replaceLen: before.length - this._triggerStart,
-        moveCursorTo: null,
-      }));
+      if (namePart === undefined) {
+        const filtered = this._TYPES.filter(t =>
+          !typePart || t.label.toLowerCase().startsWith(typePart.toLowerCase())
+        );
+        if (!filtered.length) { this.hide(); return; }
+        this._items = filtered.map(t => ({
+          text: t.label, sub: '', icon: t.icon, color: t.color,
+          insert: `[${t.label}:`, _partialType: true,
+        }));
+        this._sel = 0; this._render(inp); return;
+      } else {
+        const typeDef = this._TYPES.find(t => t.label.toLowerCase() === typePart.toLowerCase());
+        if (!typeDef) { this.hide(); return; }
+        const q = namePart.toLowerCase();
+        const results = typeDef.src().filter(e => e.name && e.name.toLowerCase().includes(q)).slice(0, 8);
+        if (!results.length) { this.hide(); return; }
+        this._items = results.map(e => ({
+          text: e.name, sub: e.sub, icon: typeDef.icon, color: typeDef.color,
+          insert: `[${typeDef.label}:${e.name}]`,
+        }));
+        this._sel = 0; this._render(inp); return;
+      }
     }
 
+    // --- Mod 2: Düz yazı — son kelimeyi al, tüm kaynaklarda ara ---
+    // Boşluk, satır sonu veya başlangıçtan itibaren son "token"
+    const wordM = before.match(/(?:^|[\s,])([^\s,\[]{2,})$/);
+    if (!wordM) { this.hide(); return; }
+    const q = wordM[1].toLowerCase();
+    this._triggerStart = before.length - wordM[1].length; // son kelimenin başlangıcı
+
+    const hits = [];
+    for (const t of this._TYPES) {
+      t.src().forEach(e => {
+        if (!e.name) return;
+        const nameLC = e.name.toLowerCase();
+        const subLC  = (e.sub||'').toLowerCase();
+        if (nameLC.includes(q) || subLC.includes(q)) {
+          hits.push({ text: e.name, sub: e.sub||'', icon: t.icon, color: t.color,
+                      insert: `[${t.label}:${e.name}]`, _typeLabel: t.label });
+        }
+      });
+    }
+    if (!hits.length) { this.hide(); return; }
+    // En fazla 10, önce tam eşleşmeler
+    hits.sort((a,b) => {
+      const aExact = a.text.toLowerCase().startsWith(q) ? 0 : 1;
+      const bExact = b.text.toLowerCase().startsWith(q) ? 0 : 1;
+      return aExact - bExact;
+    });
+    this._items = hits.slice(0, 10);
     this._sel = 0;
     this._render(inp);
   },
@@ -3224,7 +3239,8 @@ const Autocomplete = {
       row.dataset.idx = i;
       row.style.cssText = `display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;transition:background .1s`;
       row.style.background = i === this._sel ? 'var(--bg5)' : '';
-      row.innerHTML = `<i class="fas fa-${it.icon}" style="color:${it.color};width:14px;font-size:12px"></i><span style="font-size:13px;color:var(--t1);flex:1">${it.text}</span>${it.sub ? `<span style="font-size:11px;color:var(--t3)">${it.sub}</span>` : ''}`;
+      const typeLabel = it._typeLabel ? `<span style="font-size:10px;color:${it.color};font-family:var(--mono);opacity:.7;margin-left:4px">${it._typeLabel}</span>` : '';
+      row.innerHTML = `<i class="fas fa-${it.icon}" style="color:${it.color};width:14px;font-size:12px"></i><span style="font-size:13px;color:var(--t1);flex:1">${it.text}</span>${it.sub ? `<span style="font-size:11px;color:var(--t3)">${it.sub}</span>` : ''}${typeLabel}`;
       row.onmouseenter = () => { this._sel = i; this._highlight(); };
       row.onmousedown = e => { e.preventDefault(); this._sel = i; this.confirm(); };
       el.appendChild(row);
