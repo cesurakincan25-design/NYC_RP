@@ -1586,7 +1586,7 @@ const RP={
   async deleteRoom(roomId){
     const room=S.rooms.find(r=>r.id==roomId);if(!room)return;
     if(!confirm(`"${room.name}" odasını kalıcı olarak sil? Tüm mesajlar gider!`))return;
-    if(!S._off)try{await DB.patch('rp_rooms',`id=eq.${roomId}`,{is_archived:true});}catch(e){}
+    if(!S._off)try{await DB.delete('rp_rooms',`id=eq.${roomId}`);}catch(e){}
     S.rooms=S.rooms.filter(r=>r.id!=roomId);
     delete S.msgs[roomId];
     UI.renderRooms();
