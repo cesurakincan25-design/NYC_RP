@@ -136,35 +136,48 @@ const DMFB = {
    GEMINI CLIENT — Firebase AI Logic (no API key in browser)
 ════════════════════════════════════════════════════════ */
 const DMGemini = {
+  // API key is injected at build time by GitHub Actions (never hardcoded here)
+  // window.DM_CONFIG.geminiKey is set in index.html as '__GEMINI_KEY__'
+  // which gets replaced with the real key via: sed -i "s|__GEMINI_KEY__|${GEMINI_KEY}|g" index.html
+  GEMINI_BASE: 'https://generativelanguage.googleapis.com/v1beta/models',
+
   async generate(prompt, opts = {}) {
-    // Wait up to 8s for Firebase AI to initialise
-    let waited = 0;
-    while (!window._fbAIReady && waited < 8000) {
-      await new Promise(r => setTimeout(r, 100));
-      waited += 100;
-    }
-    if (!window._fbAIReady || !window._fbGetModel) {
-      throw new Error('[DM] Firebase AI Logic hazır değil');
+    const key = window.DM_CONFIG?.geminiKey;
+    if (!key || key === '__GEMINI_KEY__') {
+      throw new Error('[DM] Gemini API key ayarlanmamış (GitHub Actions deploy gerekli)');
     }
 
-    const model  = window._fbGetModel(DM.GEM_MODEL);
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature:      opts.temperature     ?? 0.75,
-        topP:             opts.topP            ?? 0.9,
-        maxOutputTokens:  opts.maxOutputTokens ?? 1500,
-        responseMimeType: opts.json ? 'application/json' : 'text/plain',
-      },
-      safetySettings: [
-        { category: 'HARM_CATEGORY_HARASSMENT',        threshold: 'BLOCK_NONE' },
-        { category: 'HARM_CATEGORY_HATE_SPEECH',       threshold: 'BLOCK_NONE' },
-        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-      ],
-    });
+    const model = DM.GEM_MODEL;
+    const res = await fetch(
+      `${DMGemini.GEMINI_BASE}/${model}:generateContent?key=${key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature:      opts.temperature     ?? 0.75,
+            topP:             opts.topP            ?? 0.9,
+            maxOutputTokens:  opts.maxOutputTokens ?? 1500,
+            responseMimeType: opts.json ? 'application/json' : 'text/plain',
+          },
+          safetySettings: [
+            { category: 'HARM_CATEGORY_HARASSMENT',        threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_HATE_SPEECH',       threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+          ],
+        }),
+      }
+    );
 
-    const text = result?.response?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(`[DM] Gemini hata ${res.status}: ${err.error?.message || res.statusText}`);
+    }
+
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error('[DM] Gemini boş yanıt döndürdü');
 
     if (opts.json) {
