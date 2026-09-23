@@ -599,7 +599,8 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
         <button class="ma-sb-qbtn" onclick="MASidebar.quick('Observer AI birikmiş mesajlarını hemen işle. FLUSH_OAI')">⚡ OAI</button>
         <button class="ma-sb-qbtn" onclick="MASidebar.quick('DM bağlamını güncelle. READ_DM')">📖 DM</button>
         <button class="ma-sb-qbtn" onclick="MASidebar.quick('Şu anki RP ortamına uygun küçük bir sokak olayı yarat ve ilgili karakterleri oynayarak sahneye yaz (SEND_MSG kullan).')">🌐 Olay</button>
-        <button class="ma-sb-qbtn" onclick="MASidebar.setupAct()">⏰ Setup At</button>
+        <button class="ma-sb-qbtn" onclick="MASidebar.setupAct()">🌆 Setup At</button>
+        <button class="ma-sb-qbtn" onclick="MASidebar.entityCheck()" title="Son mesajlarda etiketlenen entity'leri kontrol et, DB'ye kayıt gerekiyor mu sor">🏷️ Entity</button>
         <button class="ma-sb-qbtn" id="session-start-btn" onclick="Session.startDialog()" style="border-color:rgba(74,143,226,.4);color:var(--ac)" title="Yeni RP Sessionu başlat — setup atar, önceki sessioni kapatır">🎬 Session Başlat</button>
         <button class="ma-sb-qbtn" id="ma-auto-toggle" onclick="MASidebar.toggleAuto()" title="Mesaj gönderince MA otomatik sahneyi devam ettirir">🤖 Oto: AÇ</button>
       </div>
@@ -625,7 +626,9 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
   <span style="font-family:var(--mono);font-size:10px;color:var(--t3)" id="last-run">—</span>
   <div class="adm-spc"></div>
   <button class="adm-btn primary" id="obs-start" onclick="Adm.startObs()"><i class="fas fa-play"></i> Start</button>
+  <button class="adm-btn" id="obs-session-start" onclick="Adm.startSessionObs()" style="border-color:rgba(74,143,226,.4);color:var(--ac)" title="Sadece session başlangıç/bitişinde çalışır — billing dostu"><i class="fas fa-film"></i> Start Session</button>
   <button class="adm-btn danger"  id="obs-stop"  style="display:none" onclick="Adm.stopObs()"><i class="fas fa-stop"></i> Stop</button>
+  <button class="adm-btn" id="obs-dbupdate" onclick="Adm.openDBUpdate()" style="border-color:rgba(77,184,128,.4);color:#4db880" title="Birden fazla session özetine bakarak karakterleri, ilişkileri ve durumları toplu güncelle"><i class="fas fa-sync-alt"></i> DB Güncelle</button>
   <button class="adm-btn" onclick="Adm.close()"><i class="fas fa-arrow-left"></i> RP'ye Dön</button>
 </div>
 <div id="tbar"></div>
@@ -1384,6 +1387,12 @@ const RP={
       if(hasMAmention && window.MasterAgent){
         MasterAgent.send('Kullanıcı sana RP içinde seslendi: ' + txt);
         MASidebar.revealForMention();
+        // Entity tag detection — sadece @MA mention varsa çalışır
+        const entityTagPattern = /\[(Karakter|Araç|Mülk|Org|Ekipman):([^\]]+)\]/g;
+        const entityMatches = [...(pl.content||'').matchAll(entityTagPattern)];
+        if(entityMatches.length > 0){
+          setTimeout(()=>MasterAgent._entityCheck(pl, entityMatches), 2000);
+        }
       }
       if(mentionMatches.length){
         const names=mentionMatches.map(m=>m.trim());
@@ -3366,6 +3375,7 @@ const OAI={
     buf:[],ft:null,it:null,proc:false,
     ingest(msgs){
       if(!OAI.running)return;
+      if(OAI._sessionOnlyMode) return; // session-only modda gerçek zamanlı işleme kapalı
       this.buf.push(...msgs);
       if(this.buf.length>=OAI.CFG.MAX_BATCH){this.flush('full');return;}
       if(!this.ft)this.ft=setTimeout(()=>this.flush('window'),OAI.CFG.BATCH_WINDOW_MS);
@@ -3490,9 +3500,77 @@ const OAI={
       Adm.refreshFeed();Adm.updStats();
     }
   },
-  async processRoom(roomId,limit=20){
-    const msgs=await DB.get(`rp_messages?room_id=eq.${roomId}&is_deleted=eq.false&order=created_at.desc&limit=${limit}`);
-    await this.process(msgs.reverse());
+  async processRoom(roomId, limit=200, chunkSize=40){
+    // Fetch all messages up to limit
+    const msgs = await DB.get(`rp_messages?room_id=eq.${roomId}&is_deleted=eq.false&order=created_at.asc&limit=${limit}`).catch(()=>[]);
+    if(!msgs.length){ toast('İşlenecek mesaj yok',''); return; }
+
+    // Split into chunks
+    const chunks = [];
+    for(let i=0; i<msgs.length; i+=chunkSize) chunks.push(msgs.slice(i,i+chunkSize));
+    const total = chunks.length;
+
+    SessionProgress.show(`Session kaydediliyor… (0/${total} paket)`);
+
+    for(let i=0; i<chunks.length; i++){
+      SessionProgress.update(i+1, total, `Paket ${i+1}/${total} işleniyor…`);
+      try { await this.process(chunks[i]); } catch(e){ console.error('[OAI chunk]',e); }
+      // Small delay between chunks to avoid rate limits
+      if(i < chunks.length-1) await new Promise(r=>setTimeout(r,1500));
+    }
+
+    SessionProgress.update(total, total, 'Tamamlandı ✓');
+    setTimeout(()=>SessionProgress.hide(), 2000);
+  }
+};
+
+/* ═══ SESSION PROGRESS UI ═══════════════════════════════════════════════ */
+const SessionProgress = {
+  _el: null,
+  _bar: null,
+  _txt: null,
+  _pct: null,
+
+  show(label='İşleniyor…'){
+    if(this._el) this.hide();
+    const el = document.createElement('div');
+    el.id = 'session-progress-popup';
+    el.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:9990;background:var(--bg2);border:1px solid var(--ln2);border-radius:14px;padding:16px 22px;min-width:320px;max-width:480px;box-shadow:0 12px 40px rgba(0,0,0,.6);backdrop-filter:blur(8px)';
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <i class="fas fa-film" style="color:var(--ac);font-size:14px"></i>
+        <span style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ac)">Saving Session</span>
+        <span id="sp-pct" style="margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--t3)">0%</span>
+      </div>
+      <div style="background:var(--bg4);border-radius:6px;height:6px;overflow:hidden;margin-bottom:8px">
+        <div id="sp-bar" style="height:100%;width:0%;background:var(--ac);border-radius:6px;transition:width .4s ease"></div>
+      </div>
+      <div id="sp-label" style="font-size:11px;color:var(--t2);font-family:var(--sans)">${label}</div>
+    `;
+    document.body.appendChild(el);
+    this._el = el;
+    this._bar = el.querySelector('#sp-bar');
+    this._txt = el.querySelector('#sp-label');
+    this._pct = el.querySelector('#sp-pct');
+    const tbar = document.getElementById('tbar');
+    if(tbar){ tbar.classList.add('show'); tbar.textContent=''; }
+  },
+
+  update(done, total, label){
+    const pct = total > 0 ? Math.round((done/total)*100) : 0;
+    if(this._bar) this._bar.style.width = pct+'%';
+    if(this._txt) this._txt.textContent = label||'';
+    if(this._pct) this._pct.textContent = pct+'%';
+    const tbar = document.getElementById('tbar');
+    if(tbar && tbar.classList.contains('show')){
+      tbar.innerHTML = `<div style="height:3px;background:var(--ac);width:${pct}%;transition:width .4s ease;border-radius:2px"></div>`;
+    }
+  },
+
+  hide(){
+    if(this._el){ this._el.remove(); this._el=null; this._bar=null; this._txt=null; this._pct=null; }
+    const tbar = document.getElementById('tbar');
+    if(tbar) tbar.classList.remove('show');
   }
 };
 
@@ -3514,8 +3592,25 @@ const Adm={
     this._loadRooms();this.loadCfg();this.refreshFeed();this.updStats();
   },
   close(){document.getElementById('view-admin').classList.remove('active');document.getElementById('view-rp').classList.add('active');},
-  startObs(){OAI.start();document.getElementById('obs-start').style.display='none';document.getElementById('obs-stop').style.display='';},
-  stopObs(){OAI.stop();document.getElementById('obs-start').style.display='';document.getElementById('obs-stop').style.display='none';},
+  startObs(){OAI.start();document.getElementById('obs-start').style.display='none';document.getElementById('obs-session-start').style.display='none';document.getElementById('obs-stop').style.display='';},
+  stopObs(){
+    OAI._sessionOnlyMode = false;
+    OAI.stop();
+    document.getElementById('obs-start').style.display='';
+    document.getElementById('obs-session-start').style.display='';
+    document.getElementById('obs-stop').style.display='none';
+  },
+  startSessionObs(){
+    OAI._sessionOnlyMode = true;
+    OAI.start();
+    document.getElementById('obs-start').style.display='none';
+    document.getElementById('obs-session-start').style.display='none';
+    document.getElementById('obs-stop').style.display='';
+    toast('🏂 Session-only mod aktif — sadece session başlangıç/bitişinde çalışır','info');
+  },
+  openDBUpdate(){
+    DBUpdater.openModal();
+  },
   async manual(){
     const roomId=document.getElementById('trig-room').value;const limit=parseInt(document.getElementById('trig-limit').value)||20;
     if(!roomId){toast('Oda seç','warn');return;}
@@ -5010,6 +5105,14 @@ const MasterAgent = {
       '  → Kaydettikten sonra bir sonraki SEND_MSG\'de char_id olarak yeni ID\'yi kullanabilirsin.',
       '  → org_id ve alias opsiyoneldir.',
       '',
+      'SAVE_VEHICLE:{"plate":"34ABC123","model":"Dodge Charger","color":"Siyah","owner_name":"Marcus Webb","owner_id":"CHAR_ID","year":"2020","category":"Araba","mods":"Yükseltilmiş motor, koyu camlar","notes":"Gizli bölme var"}',
+      '  → Yeni bir araç veritabanına (vehicles tablosu) kaydeder.',
+      '  → owner_id opsiyoneldir. plate zorunludur.',
+      '',
+      'SAVE_PROP:{"name":"Red Hook Depo","type":"Depo","address":"Red Hook, Brooklyn","owner_name":"Marcus Webb","owner_id":"CHAR_ID","description":"Gizli silah deposu","notes":"Alt kattaki gizli oda"}',
+      '  → Yeni bir mülk/lokasyon veritabanına (properties tablosu) kaydeder.',
+      '  → type: Ev, Daire, Depo, İşyeri, Arsa, Garaj vb.',
+      '',
       '== MESAJ BİÇİMLENDİRME ==',
       'SEND_MSG içinde bu markdown sözdizimini kullanabilirsin — sistem otomatik render eder:',
       '  *aksiyon metni*       → mor italik emote (karakter fiziksek eylem)',
@@ -5174,6 +5277,64 @@ const MasterAgent = {
         results.push(`✅ NPC kaydedildi → "${newChar.name}" (ID: ${newId}) — artık SEND_MSG'de char_id olarak kullanılabilir.`);
       } catch(e) {
         results.push('❌ NPC kaydedilemedi: ' + e.message);
+      }
+    }
+
+    // SAVE_VEHICLE:{ JSON } — save a vehicle to the vehicles collection
+    const saveVehicleMatch = text.match(/SAVE_VEHICLE:(\{[\s\S]*?\})/);
+    if (saveVehicleMatch) {
+      try {
+        const p = JSON.parse(saveVehicleMatch[1]);
+        if (!p.plate) throw new Error('plate zorunlu');
+        const newVehicle = {
+          plate: p.plate,
+          model: p.model || '',
+          color: p.color || '',
+          year: p.year || '',
+          category: p.category || 'Araba',
+          owner_name: p.owner_name || '',
+          owner_id: p.owner_id || null,
+          mods: p.mods || '',
+          notes: p.notes || '',
+          tags: p.tags || ['npc_vehicle'],
+          created_by: 'master_agent',
+          status: 'Active'
+        };
+        const vRef = await DB.post('vehicles', newVehicle);
+        const newId = Array.isArray(vRef) ? vRef[0]?.id : vRef?.id;
+        if (newId) newVehicle.id = newId;
+        if (S._db?.vehicles) S._db.vehicles.push(newVehicle);
+        results.push(`✅ Araç kaydedildi → "${newVehicle.plate}" ${newVehicle.model} (ID: ${newId})`);
+      } catch (e) {
+        results.push(`❌ SAVE_VEHICLE hatası: ${e.message}`);
+      }
+    }
+
+    // SAVE_PROP:{ JSON } — save a property to the properties collection
+    const savePropMatch = text.match(/SAVE_PROP:(\{[\s\S]*?\})/);
+    if (savePropMatch) {
+      try {
+        const p = JSON.parse(savePropMatch[1]);
+        if (!p.name) throw new Error('name zorunlu');
+        const newProp = {
+          name: p.name,
+          type: p.type || 'Mülk',
+          address: p.address || '',
+          owner_name: p.owner_name || '',
+          owner_id: p.owner_id || null,
+          description: p.description || '',
+          notes: p.notes || '',
+          tags: p.tags || ['npc_property'],
+          created_by: 'master_agent',
+          status: 'Active'
+        };
+        const pRef = await DB.post('properties', newProp);
+        const newId = Array.isArray(pRef) ? pRef[0]?.id : pRef?.id;
+        if (newId) newProp.id = newId;
+        if (S._db?.properties) S._db.properties.push(newProp);
+        results.push(`✅ Mülk kaydedildi → "${newProp.name}" (ID: ${newId})`);
+      } catch (e) {
+        results.push(`❌ SAVE_PROP hatası: ${e.message}`);
       }
     }
 
@@ -5419,6 +5580,236 @@ const MasterAgent = {
       console.warn('[MA Auto] Error:', e.message);
     }
   },
+  async _entityCheck(msg, entityMatches) {
+    if(this._busy) return;
+    // Build a concise check prompt
+    const content = msg.content || '';
+    const charName = msg.char_name || '?';
+    const entities = entityMatches.map(m => `[${m[1]}:${m[2]}]`).join(', ');
+
+    const checkPrompt = [
+      `[ENTİTE KONTROL] ${charName} şunu söyledi: "${content.slice(0,300)}"`,
+      `Etiketlenen öğeler: ${entities}`,
+      '',
+      'Bu mesajda veritabanına kaydedilmesi gereken bir değişiklik var mı?',
+      'Örnekler:',
+      '  - Karakter bir araç SATIN ALDI veya KİRALADI → SAVE_VEHICLE ile kaydet ve sor',
+      '  - Karakter bir mülk SATIN ALDI veya KİRALADI → SAVE_PROP ile kaydet ve sor',
+      '  - Yeni NPC ile tanışıldı → SAVE_NPC öner',
+      '  - Sadece bir araç kullanıldı, sahneye çıktı → kayıt gerekmez',
+      '',
+      'Eğer kaydedilmesi gereken bir şey varsa:',
+      '  1. MA sidebar\'da kısaca açıkla ("Lisa bir La Ferrari satın aldı — DB\'ye ekleyeyim mi?")',
+      '  2. Kullanıcı onaylamadan SAVE_VEHICLE/SAVE_PROP/SAVE_NPC KULLANMA',
+      '  3. Onay için son cümlen "Onaylıyor musun? (evet/hayır)" olsun',
+      '',
+      'Eğer kayıt gerekmiyorsa sadece "Kayıt gerekmez." yaz — başka bir şey yazma.',
+    ].join('\n');
+
+    try {
+      const reply = await this.send(checkPrompt, { silent: true });
+      // If reply contains a question (ends with ?), reveal the sidebar so user sees it
+      if(reply && reply.includes('?') && reply.length > 20 && !/kayıt gerekmez/i.test(reply)) {
+        if(window.MASidebar) MASidebar.revealForMention();
+      }
+    } catch(e) {
+      console.warn('[MA EntityCheck]', e.message);
+    }
+  },
+};
+
+/* ═══ DB UPDATER — mass character/relationship update from OAI sessions ═══ */
+const DBUpdater = {
+  openModal() {
+    const existing = document.getElementById('dbupdate-modal');
+    if(existing) { existing.remove(); return; }
+
+    const modal = document.createElement('div');
+    modal.id = 'dbupdate-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9995;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px)';
+    modal.innerHTML = `
+      <div style="background:var(--bg2);border:1px solid var(--ln2);border-radius:16px;padding:24px;max-width:480px;width:92%;box-shadow:0 24px 64px rgba(0,0,0,.6);max-height:80vh;overflow-y:auto">
+        <div style="font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#4db880;margin-bottom:4px"><i class="fas fa-sync-alt"></i> DB Güncelle</div>
+        <div style="font-size:12.5px;color:var(--t2);margin-bottom:16px;line-height:1.5">
+          Birden fazla session özetine ve karakter hafızasına bakarak NYC_DB'yi günceller:<br>
+          <span style="color:var(--t3);font-size:11px">Karakter durumu, meslek, ilişkiler, notlar, biyografi vs.</span>
+        </div>
+
+        <div style="margin-bottom:12px">
+          <label style="font-family:var(--mono);font-size:9px;color:var(--t3);letter-spacing:.08em;text-transform:uppercase;display:block;margin-bottom:4px">Kaç session özetini al?</label>
+          <select id="dbu-session-count" style="width:100%;background:var(--bg3);border:1px solid var(--ln);color:var(--t1);border-radius:6px;padding:6px 8px;font-size:12px">
+            <option value="3">Son 3 session</option>
+            <option value="5" selected>Son 5 session</option>
+            <option value="10">Son 10 session</option>
+            <option value="20">Son 20 session</option>
+          </select>
+        </div>
+
+        <div style="margin-bottom:12px">
+          <label style="font-family:var(--mono);font-size:9px;color:var(--t3);letter-spacing:.08em;text-transform:uppercase;display:block;margin-bottom:4px">Ne güncellensin?</label>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--t1);cursor:pointer"><input type="checkbox" id="dbu-status" checked> Karakter Durumu</label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--t1);cursor:pointer"><input type="checkbox" id="dbu-notes" checked> Notlar / Biyografi</label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--t1);cursor:pointer"><input type="checkbox" id="dbu-relations" checked> İlişkiler</label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--t1);cursor:pointer"><input type="checkbox" id="dbu-occupation" checked> Meslek / Org</label>
+          </div>
+        </div>
+
+        <div id="dbu-log" style="background:var(--bg0);border:1px solid var(--ln);border-radius:8px;padding:10px;font-family:var(--mono);font-size:10px;color:var(--t2);min-height:60px;max-height:200px;overflow-y:auto;margin-bottom:14px;display:none">
+          <span style="color:var(--t3)">Hazır.</span>
+        </div>
+
+        <div style="display:flex;gap:8px">
+          <button onclick="document.getElementById('dbupdate-modal').remove()" style="flex:1;padding:9px;background:var(--bg3);border:1px solid var(--ln);color:var(--t2);border-radius:8px;cursor:pointer;font-size:12px">İptal</button>
+          <button id="dbu-run-btn" onclick="DBUpdater.run()" style="flex:2;padding:9px;background:rgba(77,184,128,.15);border:1px solid rgba(77,184,128,.4);color:#4db880;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600"><i class="fas fa-play"></i> Güncellemeyi Başlat</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e=>{ if(e.target===modal) modal.remove(); });
+  },
+
+  _log(msg, color='var(--t2)') {
+    const log = document.getElementById('dbu-log');
+    if(!log) return;
+    log.style.display = 'block';
+    const line = document.createElement('div');
+    line.style.cssText = `color:${color};margin-bottom:2px`;
+    line.textContent = `[${new Date().toLocaleTimeString('tr')}] ${msg}`;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+  },
+
+  async run() {
+    const btn = document.getElementById('dbu-run-btn');
+    if(btn) { btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin"></i> Çalışıyor…'; }
+
+    const sessionCount = parseInt(document.getElementById('dbu-session-count')?.value||5);
+    const doStatus     = document.getElementById('dbu-status')?.checked;
+    const doNotes      = document.getElementById('dbu-notes')?.checked;
+    const doRelations  = document.getElementById('dbu-relations')?.checked;
+    const doOccupation = document.getElementById('dbu-occupation')?.checked;
+
+    this._log('⏳ Backup alınıyor…');
+
+    // 0. Backup — tüm karakterleri localStorage'a kaydet
+    try {
+      const allChars = S.chars || [];
+      if(allChars.length > 0) {
+        const backupKey = `nyc_db_backup_${new Date().toISOString().slice(0,19).replace(/[T:]/g,'-')}`;
+        localStorage.setItem(backupKey, JSON.stringify({ ts: Date.now(), chars: allChars }));
+        // Sadece son 5 backup'ı tut
+        const allKeys = Object.keys(localStorage).filter(k=>k.startsWith('nyc_db_backup_')).sort();
+        while(allKeys.length > 5) { localStorage.removeItem(allKeys.shift()); }
+        this._log(`✅ Backup alındı → ${backupKey} (${allChars.length} karakter)`, '#4db880');
+      }
+    } catch(e) { this._log(`⚠️ Backup alınamadı: ${e.message}`, 'var(--am)'); }
+
+    this._log('Session özetleri alınıyor…');
+
+    // 1. Fetch summaries and memories
+    let summaries = [], memories = [], chars = [];
+    try {
+      summaries = await DB.get(`ai_summaries?summary_type=eq.rp_session&order=created_at.desc&limit=${sessionCount}`).catch(()=>[]);
+      memories  = await DB.get(`character_memories?ai_readable=eq.true&source_type=eq.rp_session&order=created_at.desc&limit=${sessionCount*20}`).catch(()=>[]);
+      chars     = (S.chars||[]).filter(c=>c.status!=='Deceased').slice(0,50);
+    } catch(e) { this._log('Veri alınamadı: '+e.message, 'var(--rd)'); return; }
+
+    this._log(`${summaries.length} özet, ${memories.length} anı, ${chars.length} karakter yüklendi.`);
+
+    if(!summaries.length && !memories.length) {
+      this._log('Güncellenecek session özeti bulunamadı.', 'var(--am)');
+      if(btn) { btn.disabled=false; btn.innerHTML='<i class="fas fa-play"></i> Güncellemeyi Başlat'; }
+      return;
+    }
+
+    // 2. Build Gemini prompt
+    const summaryText = summaries.map((s,i)=>`--- Session ${i+1}: ${s.title||'Başlıksız'} ---\n${s.content||''}`).join('\n\n');
+    const memoryText  = memories.slice(0,60).map(m=>`[${m.char_name}] ${m.title}: ${m.content||''}`).join('\n');
+    const charListText = chars.map(c=>`char_id:"${c.id}" | ${c.name} | Meslek:${c.occupation||'?'} | Durum:${c.status||'?'}`).join('\n');
+
+    const updateScope = [
+      doStatus     && 'status (Aktif/Aranan/Yaralı/Ölü vb.)',
+      doNotes      && 'notes (kısa notlar, biyografi güncelleme)',
+      doOccupation && 'occupation (meslek değişikliği)',
+      doRelations  && 'relationships (ilişki açıklaması metni — relationships alanı)',
+    ].filter(Boolean).join(', ');
+
+    const prompt = `Sen NYC_DB güncelleyicisisin. Aşağıdaki session özetlerine ve karakter anılarına bakarak karakterlerin veritabanı bilgilerini güncelle.
+
+GÜNCELLENECEK ALANLAR: ${updateScope}
+
+SESSION ÖZETLERİ:
+${summaryText}
+
+KARAKTER ANILARI (son ${memories.length} adet):
+${memoryText}
+
+MEVCUT KARAKTERLER (char_id ile):
+${charListText}
+
+GÖREV: Her karakter için SADECE gerçekten değişen alanları güncelle. Tahmin etme, sadece özetlerde/anılarda açıkça belirtilen değişiklikleri kullan.
+
+YANIT FORMATI — sadece JSON array, başka hiçbir şey:
+[
+  {
+    "char_id": "...",
+    "char_name": "...",
+    "updates": {
+      "status": "Aranan",
+      "notes": "Güncellenen not metni",
+      "occupation": "Yeni meslek",
+      "relationships": "Güncellenmiş ilişki metni"
+    },
+    "reason": "Neden güncellendi (kısa)"
+  }
+]
+
+Değişiklik olmayan karakterleri listeye dahil ETME. Eğer hiç güncelleme yoksa boş array [] döndür.`;
+
+    this._log('Gemini\'ye gönderiliyor…');
+
+    let updates = [];
+    try {
+      const result = await _geminiGenerate(prompt, { json:true, temperature:0.15, maxOutputTokens:3000 });
+      updates = Array.isArray(result) ? result : (result?.updates || []);
+    } catch(e) {
+      this._log('Gemini hatası: '+e.message, 'var(--rd)');
+      if(btn) { btn.disabled=false; btn.innerHTML='<i class="fas fa-play"></i> Güncellemeyi Başlat'; }
+      return;
+    }
+
+    this._log(`${updates.length} karakter güncellenecek.`, '#4db880');
+    SessionProgress.show(`DB güncelleniyor… (0/${updates.length} karakter)`);
+
+    // 3. Apply updates
+    let done = 0, failed = 0;
+    for(const upd of updates) {
+      if(!upd.char_id || !upd.updates || Object.keys(upd.updates).length===0) continue;
+      SessionProgress.update(done, updates.length, `${upd.char_name} güncelleniyor…`);
+      try {
+        await DB.patch('characters', `id=eq.${upd.char_id}`, upd.updates);
+        // Also update in-memory
+        const inMem = (S.chars||[]).find(c=>String(c.id)===String(upd.char_id));
+        if(inMem) Object.assign(inMem, upd.updates);
+        done++;
+        // Detaylı alan raporu
+        const updatedFields = Object.keys(upd.updates).join(', ');
+        this._log(`✅ ${upd.char_name} → [${updatedFields}]`, '#4db880');
+        if(upd.reason) this._log(`   ↳ ${upd.reason}`, 'var(--t3)');
+      } catch(e) {
+        failed++;
+        this._log(`❌ ${upd.char_name}: ${e.message}`, 'var(--rd)');
+      }
+      await new Promise(r=>setTimeout(r,300));
+    }
+
+    SessionProgress.update(updates.length, updates.length, `Tamamlandı — ${done} güncellendi, ${failed} hata`);
+    setTimeout(()=>SessionProgress.hide(), 3000);
+    this._log('─────────────────────────────', 'var(--ln2)');
+    this._log(`📊 ÖZET: ${done} karakter güncellendi, ${failed} hata.`, done>0?'#4db880':'var(--am)');
+    this._log(`📦 Backup localStorage'a kaydedildi (son 5 backup tutulur).`, 'var(--t3)');
+    if(btn) { btn.disabled=false; btn.innerHTML='<i class="fas fa-check"></i> Tamamlandı — Tekrar Çalıştır'; }
+  }
 };
 
 window.MasterAgent = MasterAgent;
@@ -5457,10 +5848,34 @@ const MASidebar = {
     }
   },
 
-  /* ── Setup At — ask MA to schedule a scene/event ── */
+  /* ── Setup At — atmosferik şehir setup'ı gönder (session başlatmadan) ── */
   setupAct() {
     const rpTime = S.roomId ? RpTime.get(S.roomId) : '—';
-    this.quick(`Şu an RP zamanı: ${rpTime}. Benden bir sahne veya olay zamanı ayarlamamı istiyorsun. Hangi saatte ne yapalım? (örn: "saat 22:00'de polis baskını" veya "sabah 08:00'de bir soygun hazırlığı")`);
+    const prompt = `Aşağıdaki formatta bir Setup mesajı yaz ve SEND_MSG komutuyla RP odasına gönder.\n\nKural: Setup sadece atmosfer ve ortam betimler — olay, aksiyon veya karakter aksiyonu OLMAZ. Sinematik, doğal, 1–2 paragraf.\n\nFormat:\n# New York City Setup\n\n**New York City 🗽, NY, USA 🇺🇸 — ${rpTime}**\n\n[Mevcut RP saatine ve mevsime göre şehrin atmosferini, sokaklarını, trafiğini, insan kalabalığını betimle. Her seferinde özgün detaylar kullan.]\n\nSadece bu formatı kullan. Başka açıklama ekleme. SEND_MSG içinde char_name kullanma.`;
+    MasterAgent.send(prompt);
+    MASidebar.revealForMention();
+  },
+
+  /* ── Entity Check — son mesajlardaki etiketleri manuel kontrol et ── */
+  async entityCheck() {
+    if (!window.MasterAgent) return;
+    if (!S.roomId) { toast('Önce bir odaya gir', 'warn'); return; }
+    toast('🏷️ Son mesajlar taranıyor…', 'info');
+    try {
+      const msgs = await DB.get(`rp_messages?room_id=eq.${S.roomId}&is_deleted=eq.false&order=created_at.desc&limit=30`).catch(()=>[]);
+      if (!msgs.length) { toast('Mesaj bulunamadı', ''); return; }
+      const entityTagPattern = /\[(Karakter|Araç|Mülk|Org|Ekipman):([^\]]+)\]/g;
+      const found = [];
+      for (const m of msgs) {
+        const matches = [...(m.content||'').matchAll(entityTagPattern)];
+        if (matches.length) found.push({ msg: m, matches });
+      }
+      if (!found.length) { toast('Son 30 mesajda etiketli entity bulunamadı', ''); return; }
+      // En son bulunanı MA'ya gönder
+      const { msg, matches } = found[0];
+      MASidebar.revealForMention();
+      await MasterAgent._entityCheck(msg, matches);
+    } catch(e) { console.warn('[EntityCheck manual]', e); toast('Entity kontrol hatası', 'error'); }
   },
 
   send() {
@@ -5595,9 +6010,10 @@ const Session = {
     const roomId = S.roomId;
     if (roomId) {
       try {
-        await OAI.processRoom(roomId, 100);
+        SessionProgress.show('Observer AI başlatılıyor…');
+        await OAI.processRoom(roomId, 300, 40);
         toast('📋 Observer AI özet çıkardı', 'success');
-      } catch(e) { console.error('[Session] OAI error', e); }
+      } catch(e) { console.error('[Session] OAI error', e); SessionProgress.hide(); }
     }
     await this._saveBackup(roomId, reason);
     if (window.MasterAgent) {
