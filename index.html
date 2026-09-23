@@ -213,6 +213,8 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 .rpill.on{background:var(--ac-d);border-color:var(--ac)}
 .rcnt{font-family:var(--mono);font-size:10px;color:var(--t2)}
 .rpill.on .rcnt{color:var(--ac)}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes cardIn{from{opacity:0;transform:scale(.92) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
 /* ═══ CONTEXT MENU ════════════════════════════════════════ */
 .ctx-menu{position:fixed;z-index:9999;background:var(--bg2);border:1px solid var(--ln2);border-radius:12px;padding:6px;min-width:200px;box-shadow:0 16px 48px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.04);backdrop-filter:blur(8px);animation:ctxIn .1s ease}
 @keyframes ctxIn{from{opacity:0;transform:scale(.96) translateY(-4px)}to{opacity:1;transform:scale(1) translateY(0)}}
@@ -2656,10 +2658,10 @@ window.ContextMenu = ContextMenu;
 /* ═══ CHAR / ENTITY CARD ════════════════════════════════ */
 const CharCard = {
   _el: null,
+  _overlay: null,
 
   show(id, x, y, type = 'char') {
     this.hide();
-    // Find entity
     let entity = null;
     if (type === 'char' || !type) {
       entity = S.ci?.get(id) || S.chars?.find(c => String(c.id) === String(id));
@@ -2668,13 +2670,20 @@ const CharCard = {
     } else if (type === 'org') {
       entity = S.oi?.get(id) || S.orgs?.find(o => String(o.id) === String(id) || o.name === id);
     } else if (type === 'prop') {
-      entity = (S._db?.properties||[]).find(p => String(p.id) === String(id));
+      entity = (S._db?.properties||[]).find(p => String(p.id) === String(id) || p.name === id);
     } else if (type === 'equip') {
-      entity = (S._db?.equipments||[]).find(e => String(e.id) === String(id));
+      entity = (S._db?.equipments||[]).find(e => String(e.id) === String(id) || e.name === id);
     }
 
+    // Overlay (yarı saydam arka plan, tıklayınca kapanır)
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9990;background:rgba(0,0,0,.55);backdrop-filter:blur(3px);animation:fadeIn .15s ease';
+    ov.onclick = () => this.hide();
+    document.body.appendChild(ov);
+    this._overlay = ov;
+
     const card = document.createElement('div');
-    card.style.cssText = `position:fixed;z-index:9998;background:var(--bg2);border:1px solid var(--ln2);border-radius:12px;box-shadow:0 12px 40px #0009;width:300px;max-height:80vh;overflow-y:auto;font-family:var(--sans);font-size:12px`;
+    card.style.cssText = 'position:fixed;z-index:9999;background:var(--bg1);border:1px solid var(--ln2);border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,.8);width:380px;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;font-family:var(--sans);animation:cardIn .18s cubic-bezier(.34,1.56,.64,1)';
 
     if (!entity) {
       card.innerHTML = this._emptyCard(id, type);
@@ -2684,14 +2693,18 @@ const CharCard = {
       card.innerHTML = this._vehicleCard(entity);
     } else if (type === 'org') {
       card.innerHTML = this._orgCard(entity);
+    } else if (type === 'prop') {
+      card.innerHTML = this._propCard(entity);
+    } else if (type === 'equip') {
+      card.innerHTML = this._equipCard(entity);
     } else {
       card.innerHTML = this._genericCard(entity, type);
     }
 
-    // Position: centered if no x/y, else near click
+    // Merkeze konumlandır (x,y varsa yakınına)
     if (x != null && y != null) {
-      const cx = Math.min(x + 10, innerWidth - 320);
-      const cy = Math.min(y + 10, innerHeight - 500);
+      const cx = Math.min(Math.max(x - 190, 8), innerWidth - 396);
+      const cy = Math.min(Math.max(y - 20, 8), innerHeight - 600);
       card.style.left = cx + 'px';
       card.style.top  = cy + 'px';
     } else {
@@ -2702,129 +2715,280 @@ const CharCard = {
 
     document.body.appendChild(card);
     this._el = card;
-    setTimeout(() => document.addEventListener('click', e => {
-      if (!card.contains(e.target)) this.hide();
-    }, {once:true}), 100);
   },
 
-  hide() { this._el?.remove(); this._el = null; },
+  hide() {
+    this._el?.remove(); this._el = null;
+    this._overlay?.remove(); this._overlay = null;
+  },
 
-  // NPC veya DB'de olmayan karakter için minimal popup
   _npcPopup(name, x, y) {
     this.hide();
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9990;background:rgba(0,0,0,.5);backdrop-filter:blur(2px)';
+    ov.onclick = () => this.hide();
+    document.body.appendChild(ov);
+    this._overlay = ov;
+
     const card = document.createElement('div');
-    card.style.cssText = `position:fixed;z-index:9998;background:var(--bg3);border:1px solid var(--ln2);border-radius:12px;box-shadow:0 12px 40px #0009;width:260px;font-family:var(--sans);font-size:12px`;
-    const cx = x != null ? Math.min(x+10, innerWidth-280) : innerWidth/2-130;
-    const cy = y != null ? Math.min(y+10, innerHeight-120) : innerHeight/2-50;
-    card.style.left = cx+'px'; card.style.top = cy+'px';
+    card.style.cssText = 'position:fixed;z-index:9999;background:var(--bg2);border:1px solid var(--ln2);border-radius:16px;box-shadow:0 20px 60px #0009;width:340px;font-family:var(--sans);left:50%;top:50%;transform:translate(-50%,-50%);animation:cardIn .18s cubic-bezier(.34,1.56,.64,1)';
     const ini = (name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-    card.innerHTML = `<div style="background:rgba(124,77,255,.1);border-bottom:1px solid var(--ln2);padding:12px 14px;border-radius:12px 12px 0 0;display:flex;gap:10px;align-items:center">
-      <div style="width:40px;height:40px;border-radius:50%;background:rgba(124,77,255,.2);border:2px solid rgba(124,77,255,.4);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:var(--ac)">${ini}</div>
-      <div style="flex:1"><div style="font-weight:600;font-size:13px;color:var(--t0)">${name}</div><div style="font-size:10px;color:var(--t3);margin-top:2px">Spontane NPC</div></div>
-      <button onclick="CharCard.hide()" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:14px;padding:0">✕</button>
-    </div>
-    <div style="padding:12px 14px">
-      <p style="color:var(--t3);font-size:11px;margin:0 0 10px">Bu karakter veritabanında kayıtlı değil — MA tarafından spontane oluşturuldu.</p>
-      <button onclick="if(window.MasterAgent){MasterAgent.send('SAVE_NPC:{\"name\":\"${name.replace(/"/g,'\\"')}\"}');CharCard.hide();}" style="width:100%;padding:7px;background:rgba(124,77,255,.15);border:1px solid rgba(124,77,255,.4);color:var(--ac);border-radius:7px;cursor:pointer;font-size:11px;font-family:var(--sans)"><i class="fas fa-save" style="margin-right:5px"></i>DB'ye Kaydet (MA)</button>
-    </div>`;
+    card.innerHTML = `
+      <div style="padding:20px;background:linear-gradient(135deg,rgba(124,77,255,.15),rgba(74,143,226,.1));border-radius:16px 16px 0 0;border-bottom:1px solid var(--ln2);display:flex;gap:12px;align-items:center">
+        <div style="width:52px;height:52px;border-radius:50%;background:rgba(124,77,255,.25);border:2px solid rgba(124,77,255,.5);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:var(--ac);flex-shrink:0">${ini}</div>
+        <div style="flex:1"><div style="font-weight:700;font-size:15px;color:var(--t0)">${name}</div><div style="font-size:11px;color:var(--pu);margin-top:2px;font-family:var(--mono)">● Spontane NPC</div></div>
+        <button onclick="CharCard.hide()" style="background:rgba(255,255,255,.07);border:1px solid var(--ln2);color:var(--t2);cursor:pointer;font-size:14px;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center">✕</button>
+      </div>
+      <div style="padding:16px">
+        <p style="color:var(--t3);font-size:12px;margin:0 0 12px;line-height:1.5">Bu karakter veritabanında kayıtlı değil — MA tarafından spontane oluşturuldu.</p>
+        <button onclick="if(window.MasterAgent){MasterAgent.send('SAVE_NPC:{\"name\":\"${name.replace(/"/g,'\\"')}\"}');CharCard.hide();}" style="width:100%;padding:9px;background:rgba(124,77,255,.15);border:1px solid rgba(124,77,255,.4);color:var(--ac);border-radius:8px;cursor:pointer;font-size:12px;font-family:var(--sans)"><i class="fas fa-save" style="margin-right:6px"></i>DB'ye Kaydet (MA)</button>
+      </div>`;
     document.body.appendChild(card);
     this._el = card;
-    setTimeout(()=>document.addEventListener('click',e=>{if(!card.contains(e.target))this.hide();},{once:true}),100);
   },
 
-  _hdr(title, subtitle, avatar, color, closeAction) {
-    const bg = color ? color + '22' : 'var(--bg3)';
-    const bdr = color ? color + '66' : 'var(--ln2)';
-    return `<div style="background:${bg};border-bottom:1px solid ${bdr};padding:14px 14px 10px;border-radius:12px 12px 0 0;display:flex;gap:10px;align-items:flex-start">
-      ${avatar ? `<img src="${avatar}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid ${bdr};flex-shrink:0" onerror="this.style.display='none'">` :
-        `<div style="width:48px;height:48px;border-radius:50%;background:${bg};border:2px solid ${bdr};display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;color:${color||'var(--t2)'}">${title[0]?.toUpperCase()||'?'}</div>`}
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:600;font-size:14px;color:var(--t0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title}</div>
-        ${subtitle ? `<div style="color:var(--t3);font-size:11px;margin-top:2px">${subtitle}</div>` : ''}
-      </div>
-      <button onclick="CharCard.hide()" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:16px;padding:0;line-height:1">✕</button>
-    </div>`;
-  },
-
-  _row(label, value, color) {
-    if (!value && value !== 0) return '';
-    return `<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--ln)">
-      <span style="color:var(--t3);min-width:80px;flex-shrink:0">${label}</span>
-      <span style="color:${color||'var(--t1)'};flex:1">${value}</span>
-    </div>`;
-  },
-
+  // ── Karakter Kartı ───────────────────────────────────
   _charCard(c) {
     const org = S.oi?.get((c.organizations||[])[0] || c.organization);
-    const orgBadge = org ? `<span style="background:${org.color||'var(--ac)'}22;color:${org.color||'var(--ac)'};border:1px solid ${org.color||'var(--ac)'}44;padding:2px 8px;border-radius:20px;font-size:10px">${org.name}</span>` : '';
-    const statusColor = c.status === 'Active' ? 'var(--gn)' : c.status === 'Deceased' ? 'var(--rd)' : 'var(--am)';
+    const orgColor = org?.color || 'var(--ac)';
+    const statusColor = {Active:'#4db880',Deceased:'#e05555',Imprisoned:'#e8a74a',Missing:'#9b6fd4'}[c.status] || 'var(--t2)';
     const vehicles = (S._db?.vehicles||[]).filter(v => v.owner_id === c.id || (v.owners||[]).includes(c.id));
     const props    = (S._db?.properties||[]).filter(p => p.owner_id === c.id);
+    const ini = (c.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
 
-    return this._hdr(
-      c.name + (c.alias ? ` <span style="color:var(--t3);font-weight:400">"${c.alias}"</span>` : ''),
-      orgBadge, c.image, org?.color
-    ) + `<div style="padding:12px 14px;display:flex;flex-direction:column;gap:2px">
-      ${this._row('Durum', `<span style="color:${statusColor}">${c.status||'Active'}</span>`)}
-      ${this._row('Yaş', c.age)}
-      ${this._row('Cinsiyet', c.gender)}
-      ${this._row('Meslek', c.occupation)}
-      ${this._row('Uyruk', c.nationality)}
-      ${c.backstory ? `<div style="margin-top:8px"><div style="color:var(--t3);margin-bottom:4px">Geçmiş</div><div style="color:var(--t2);line-height:1.5;font-size:11px">${c.backstory.slice(0,300)}${c.backstory.length>300?'…':''}</div></div>` : ''}
-      ${c.personality ? `<div style="margin-top:8px"><div style="color:var(--t3);margin-bottom:4px">Kişilik</div><div style="color:var(--t2);line-height:1.5;font-size:11px">${c.personality.slice(0,200)}${c.personality.length>200?'…':''}</div></div>` : ''}
-      ${vehicles.length ? `<div style="margin-top:8px"><div style="color:var(--t3);margin-bottom:4px">Araçlar</div>${vehicles.map(v=>`<div style="color:var(--am);font-size:11px">🚗 ${v.name||v.model||v.plate}</div>`).join('')}</div>` : ''}
-      ${props.length ? `<div style="margin-top:8px"><div style="color:var(--t3);margin-bottom:4px">Mülkler</div>${props.map(p=>`<div style="color:var(--pu);font-size:11px">🏠 ${p.name}</div>`).join('')}</div>` : ''}
+    const heroBg = c.image
+      ? 'background:url(\'' + c.image + '\') center/cover no-repeat;'
+      : 'background:linear-gradient(135deg,' + orgColor + '33,' + orgColor + '11);';
+
+    return `
+    <!-- Hero Banner -->
+    <div style="${heroBg}min-height:160px;position:relative;border-radius:16px 16px 0 0;overflow:hidden;flex-shrink:0">
+      ${c.image ? '<div style="position:absolute;inset:0;background:linear-gradient(to bottom,rgba(0,0,0,.1) 0%,rgba(0,0,0,.75) 100%)"></div>' : ''}
+      ${!c.image ? '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:52px;font-weight:700;color:' + orgColor + ';opacity:.25">' + ini + '</div>' : ''}
+      <!-- Kapat butonu -->
+      <button onclick="CharCard.hide()" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.15);color:#fff;cursor:pointer;font-size:14px;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)">✕</button>
+      <!-- Alt bilgi -->
+      <div style="position:absolute;bottom:0;left:0;right:0;padding:12px 14px">
+        ${!c.image ? '<div style="width:64px;height:64px;border-radius:50%;background:' + orgColor + '33;border:2px solid ' + orgColor + '66;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:' + orgColor + ';margin-bottom:8px">' + ini + '</div>' : ''}
+        <div style="font-size:17px;font-weight:700;color:#fff;text-shadow:0 1px 4px #0008">${c.name}${c.alias ? ' <span style="font-size:13px;font-weight:400;opacity:.75">"' + c.alias + '"</span>' : ''}</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:4px;flex-wrap:wrap">
+          ${org ? '<span style="background:' + orgColor + '33;color:' + orgColor + ';border:1px solid ' + orgColor + '66;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;font-family:var(--mono)">' + org.name + '</span>' : ''}
+          <span style="background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}44;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;font-family:var(--mono)">● ${c.status||'Active'}</span>
+        </div>
+      </div>
+    </div>
+    <!-- Body -->
+    <div style="overflow-y:auto;flex:1;padding:14px;display:flex;flex-direction:column;gap:10px">
+      <!-- Stats grid -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        ${this._stat('Yaş', c.age, 'fa-birthday-cake')}
+        ${this._stat('Cinsiyet', c.gender, 'fa-venus-mars')}
+        ${this._stat('Meslek', c.occupation, 'fa-briefcase')}
+        ${this._stat('Uyruk', c.nationality, 'fa-flag')}
+        ${c.phone ? this._stat('Telefon', c.phone, 'fa-phone') : ''}
+        ${c.address ? this._stat('Adres', c.address, 'fa-map-marker-alt') : ''}
+      </div>
+      <!-- Skills -->
+      ${c.skills?.length ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Yetenekler</div><div style="display:flex;flex-wrap:wrap;gap:4px">' + (Array.isArray(c.skills)?c.skills:[c.skills]).map(s=>'<span style="background:var(--bg4);border:1px solid var(--ln2);color:var(--t1);padding:2px 8px;border-radius:12px;font-size:11px">' + s + '</span>').join('') + '</div></div>' : ''}
+      <!-- Geçmiş -->
+      ${c.backstory ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Arka Plan</div><div style="color:var(--t2);line-height:1.6;font-size:12px;background:var(--bg3);border-radius:8px;padding:10px">' + c.backstory.slice(0,400) + (c.backstory.length>400?'…':'') + '</div></div>' : ''}
+      <!-- Kişilik -->
+      ${c.personality ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Kişilik</div><div style="color:var(--t2);line-height:1.6;font-size:12px;background:var(--bg3);border-radius:8px;padding:10px">' + c.personality.slice(0,250) + (c.personality.length>250?'…':'') + '</div></div>' : ''}
+      <!-- Araçlar -->
+      ${vehicles.length ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Araçlar</div><div style="display:flex;flex-direction:column;gap:4px">' + vehicles.map(v=>'<div onclick="CharCard.show(\'' + v.id + '\',null,null,\'vehicle\')" style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--bg3);border:1px solid var(--ln);border-radius:8px;cursor:pointer;transition:background .12s" onmouseenter="this.style.background=\'var(--bg4)\'" onmouseleave="this.style.background=\'var(--bg3)\'"><span style="font-size:16px">🚗</span><div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;color:var(--t0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (v.name||v.model||'Araç') + '</div>' + (v.plate?'<div style="font-size:10px;color:#e8a74a;font-family:var(--mono)">' + v.plate + '</div>':'') + '</div></div>').join('') + '</div></div>' : ''}
+      <!-- Mülkler -->
+      ${props.length ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Mülkler</div><div style="display:flex;flex-direction:column;gap:4px">' + props.map(p=>'<div onclick="CharCard.show(\'' + p.id + '\',null,null,\'prop\')" style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--bg3);border:1px solid var(--ln);border-radius:8px;cursor:pointer;transition:background .12s" onmouseenter="this.style.background=\'var(--bg4)\'" onmouseleave="this.style.background=\'var(--bg3)\'"><span style="font-size:16px">🏠</span><div style="font-size:12px;font-weight:600;color:var(--t0)">' + p.name + '</div></div>').join('') + '</div></div>' : ''}
+      <!-- Notlar -->
+      ${c.notes ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Notlar</div><div style="color:var(--t2);line-height:1.6;font-size:12px;background:rgba(232,167,74,.07);border:1px solid rgba(232,167,74,.2);border-radius:8px;padding:10px">' + c.notes.slice(0,300) + (c.notes.length>300?'…':'') + '</div></div>' : ''}
+    </div>
+    <!-- Footer -->
+    <div style="padding:10px 14px;border-top:1px solid var(--ln);display:flex;gap:6px;flex-shrink:0;background:var(--bg2)">
+      <button onclick="CharCard.openInDB('${c.id}','character')" style="flex:1;padding:8px;background:var(--bg4);border:1px solid var(--ln2);color:var(--t1);border-radius:8px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:5px;transition:background .12s" onmouseenter="this.style.background='var(--bg5)'" onmouseleave="this.style.background='var(--bg4)'"><i class="fas fa-external-link-alt" style="font-size:10px"></i>DB'de Aç</button>
+      <button onclick="const inp=document.getElementById('msg-input');if(inp){inp.value+='**${c.name}:** ';inp.focus();}CharCard.hide();" style="flex:1;padding:8px;background:rgba(74,143,226,.15);border:1px solid rgba(74,143,226,.3);color:var(--ac);border-radius:8px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:5px" onmouseenter="this.style.opacity='.8'" onmouseleave="this.style.opacity='1'"><i class="fas fa-at" style="font-size:10px"></i>Mesaja Etiketle</button>
     </div>`;
   },
 
+  // ── Araç Kartı ──────────────────────────────────────
   _vehicleCard(v) {
     const owner = S.ci?.get(v.owner_id) || S.chars?.find(c => String(c.id) === String(v.owner_id));
-    return this._hdr(
-      v.name || v.model || 'Araç',
-      v.plate ? `Plaka: ${v.plate}` : '', null, '#e8a74a'
-    ) + `<div style="padding:12px 14px;display:flex;flex-direction:column;gap:2px">
-      ${this._row('Model', v.model)}
-      ${this._row('Marka', v.brand || v.make)}
-      ${this._row('Plaka', v.plate, '#e8a74a')}
-      ${this._row('Renk', v.color)}
-      ${this._row('Yıl', v.year)}
-      ${this._row('Durum', v.status)}
-      ${this._row('Sahip', owner ? owner.name : v.owner_name)}
-      ${v.description ? `<div style="margin-top:8px"><div style="color:var(--t3);margin-bottom:4px">Açıklama</div><div style="color:var(--t2);line-height:1.5;font-size:11px">${v.description}</div></div>` : ''}
+    const co_owners = (v.owners||[]).filter(id=>id!==v.owner_id).map(id=>S.ci?.get(id)||S.chars?.find(c=>String(c.id)===String(id))).filter(Boolean);
+    const statusColor = {Active:'#4db880',active:'#4db880',Stolen:'#e05555',stolen:'#e05555',Impounded:'#e8a74a',impounded:'#e8a74a',Totaled:'#e05555'}[v.status] || 'var(--t2)';
+
+    const heroBg = v.image
+      ? 'background:url(\'' + v.image + '\') center/cover no-repeat;min-height:160px;'
+      : 'background:linear-gradient(135deg,rgba(232,167,74,.2),rgba(232,167,74,.05));min-height:120px;display:flex;align-items:center;justify-content:center;';
+
+    return `
+    <div style="${heroBg}position:relative;border-radius:16px 16px 0 0;overflow:hidden;flex-shrink:0">
+      ${v.image ? '<div style="position:absolute;inset:0;background:linear-gradient(to bottom,rgba(0,0,0,.05),rgba(0,0,0,.7))"></div>' : '<div style="font-size:64px;opacity:.3">🚗</div>'}
+      <button onclick="CharCard.hide()" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.15);color:#fff;cursor:pointer;font-size:14px;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)">✕</button>
+      <div style="position:absolute;bottom:0;left:0;right:0;padding:12px 14px">
+        <div style="font-family:var(--mono);font-size:22px;font-weight:700;color:#e8a74a;letter-spacing:.08em;text-shadow:0 2px 8px #0008">${v.plate||''}</div>
+        <div style="font-size:16px;font-weight:700;color:#fff;text-shadow:0 1px 4px #0008">${v.name||v.model||'Araç'}</div>
+        <div style="display:flex;gap:6px;margin-top:4px">
+          ${v.status ? '<span style="background:' + statusColor + '22;color:' + statusColor + ';border:1px solid ' + statusColor + '44;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;font-family:var(--mono)">● ' + v.status + '</span>' : ''}
+        </div>
+      </div>
+    </div>
+    <div style="overflow-y:auto;flex:1;padding:14px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        ${this._stat('Marka', v.brand||v.make, 'fa-industry')}
+        ${this._stat('Model', v.model, 'fa-car')}
+        ${this._stat('Renk', v.color, 'fa-palette')}
+        ${this._stat('Yıl', v.year, 'fa-calendar')}
+        ${this._stat('Kategori', v.category||v.type, 'fa-tag')}
+        ${this._stat('Motor', v.engine, 'fa-cog')}
+      </div>
+      ${v.description ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Açıklama</div><div style="color:var(--t2);line-height:1.6;font-size:12px;background:var(--bg3);border-radius:8px;padding:10px">' + v.description + '</div></div>' : ''}
+      ${(v.mods||v.modifications) ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Modifikasyonlar</div><div style="color:var(--am);line-height:1.6;font-size:12px;background:rgba(232,167,74,.07);border:1px solid rgba(232,167,74,.2);border-radius:8px;padding:10px">' + (v.mods||v.modifications) + '</div></div>' : ''}
+      <!-- Sahip -->
+      ${owner ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Sahip</div><div onclick="CharCard.show(\'' + owner.id + '\',null,null,\'char\')" style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border:1px solid var(--ln);border-radius:8px;cursor:pointer;transition:background .12s" onmouseenter="this.style.background=\'var(--bg4)\'" onmouseleave="this.style.background=\'var(--bg3)\'">' + (owner.image ? '<img src="' + owner.image + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--ln2)">' : '<div style="width:36px;height:36px;border-radius:50%;background:var(--bg4);border:2px solid var(--ln2);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--t1)">' + (owner.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2) + '</div>') + '<div><div style="font-size:13px;font-weight:600;color:var(--t0)">' + owner.name + '</div><div style="font-size:10px;color:var(--t3)">' + (owner.occupation||'') + '</div></div><i class="fas fa-chevron-right" style="margin-left:auto;color:var(--t3);font-size:10px"></i></div></div>' : ''}
+      ${co_owners.length ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Ortak Sahipler</div><div style="display:flex;gap:6px;flex-wrap:wrap">' + co_owners.map(co=>'<div onclick="CharCard.show(\'' + co.id + '\',null,null,\'char\')" style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:var(--bg3);border:1px solid var(--ln);border-radius:20px;cursor:pointer;font-size:11px;color:var(--t1)">' + (co.image?'<img src="' + co.image + '" style="width:18px;height:18px;border-radius:50%;object-fit:cover">':'') + co.name + '</div>').join('') + '</div></div>' : ''}
+      ${v.notes ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Notlar</div><div style="color:var(--t2);font-size:12px;background:rgba(232,167,74,.07);border:1px solid rgba(232,167,74,.2);border-radius:8px;padding:10px;line-height:1.6">' + v.notes + '</div></div>' : ''}
+    </div>
+    <div style="padding:10px 14px;border-top:1px solid var(--ln);display:flex;gap:6px;flex-shrink:0;background:var(--bg2)">
+      <button onclick="CharCard.openInDB('${v.id}','vehicle')" style="flex:1;padding:8px;background:var(--bg4);border:1px solid var(--ln2);color:var(--t1);border-radius:8px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:5px" onmouseenter="this.style.background='var(--bg5)'" onmouseleave="this.style.background='var(--bg4)'"><i class="fas fa-external-link-alt" style="font-size:10px"></i>DB'de Aç</button>
+      <button onclick="const inp=document.getElementById('msg-input');if(inp){inp.value+='[Araç:${(v.plate||v.name||'').replace(/'/g,"\\'")}] ';inp.focus();}CharCard.hide();" style="flex:1;padding:8px;background:rgba(232,167,74,.15);border:1px solid rgba(232,167,74,.3);color:#e8a74a;border-radius:8px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:5px"><i class="fas fa-tag" style="font-size:10px"></i>Mesaja Etiketle</button>
     </div>`;
   },
 
+  // ── Org Kartı ───────────────────────────────────────
   _orgCard(o) {
     const members = (S.chars||[]).filter(c => (c.organizations||[]).includes(o.id) || c.organization === o.id);
-    return this._hdr(o.name, o.type || 'Organizasyon', o.logo || o.image, o.color) +
-    `<div style="padding:12px 14px;display:flex;flex-direction:column;gap:2px">
-      ${this._row('Tür', o.type)}
-      ${this._row('Durum', o.status)}
-      ${o.description ? `<div style="margin-top:8px"><div style="color:var(--t3);margin-bottom:4px">Açıklama</div><div style="color:var(--t2);line-height:1.5;font-size:11px">${o.description}</div></div>` : ''}
-      ${members.length ? `<div style="margin-top:8px"><div style="color:var(--t3);margin-bottom:4px">Üyeler (${members.length})</div>${members.slice(0,8).map(c=>`<div style="color:var(--t1);font-size:11px">• ${c.name}</div>`).join('')}${members.length>8?`<div style="color:var(--t3);font-size:10px">+${members.length-8} daha</div>`:''}</div>` : ''}
+    const leader  = members.find(m => m.rank === 'Leader' || m.role === 'Leader' || m.is_leader) || members[0];
+    const orgColor = o.color || 'var(--ac)';
+
+    return `
+    <div style="background:linear-gradient(135deg,${orgColor}33,${orgColor}11);min-height:140px;position:relative;border-radius:16px 16px 0 0;overflow:hidden;flex-shrink:0;display:flex;align-items:flex-end;padding:14px">
+      ${(o.logo||o.image) ? '<img src="' + (o.logo||o.image) + '" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-60%);height:80px;object-fit:contain;opacity:.2">' : '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-60%);font-size:56px;opacity:.15">🏢</div>'}
+      <button onclick="CharCard.hide()" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.15);color:#fff;cursor:pointer;font-size:14px;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center">✕</button>
+      <div>
+        ${(o.logo||o.image) ? '<img src="' + (o.logo||o.image) + '" style="height:36px;object-fit:contain;margin-bottom:6px;border-radius:4px">' : ''}
+        <div style="font-size:18px;font-weight:700;color:#fff">${o.name}</div>
+        <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+          ${o.type ? '<span style="background:' + orgColor + '33;color:' + orgColor + ';border:1px solid ' + orgColor + '66;padding:2px 8px;border-radius:20px;font-size:10px;font-family:var(--mono)">' + o.type + '</span>' : ''}
+          ${o.status ? '<span style="background:rgba(77,184,128,.2);color:#4db880;border:1px solid rgba(77,184,128,.4);padding:2px 8px;border-radius:20px;font-size:10px;font-family:var(--mono)">● ' + o.status + '</span>' : ''}
+          <span style="background:rgba(255,255,255,.1);color:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.15);padding:2px 8px;border-radius:20px;font-size:10px;font-family:var(--mono)">${members.length} üye</span>
+        </div>
+      </div>
+    </div>
+    <div style="overflow-y:auto;flex:1;padding:14px;display:flex;flex-direction:column;gap:10px">
+      ${o.description ? '<div style="color:var(--t2);line-height:1.6;font-size:12px;background:var(--bg3);border-radius:8px;padding:10px;border-left:3px solid ' + orgColor + '">' + o.description + '</div>' : ''}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        ${this._stat('Kuruluş', o.founded, 'fa-calendar')}
+        ${this._stat('Merkez', o.hq||o.location, 'fa-map-marker-alt')}
+        ${this._stat('Lider', leader?.name, 'fa-crown')}
+        ${this._stat('Servet', o.wealth||o.budget, 'fa-dollar-sign')}
+      </div>
+      ${members.length ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:8px">Üyeler (' + members.length + ')</div><div style="display:flex;flex-wrap:wrap;gap:6px">' + members.slice(0,12).map(m=>'<div onclick="CharCard.show(\'' + m.id + '\',null,null,\'char\')" title="' + m.name + '" style="cursor:pointer;transition:transform .1s" onmouseenter="this.style.transform=\'scale(1.1)\'" onmouseleave="this.style.transform=\'scale(1)\'">' + (m.image ? '<img src="' + m.image + '" style="width:38px;height:38px;border-radius:50%;object-fit:cover;border:2px solid ' + orgColor + '44" title="' + m.name + '">' : '<div style="width:38px;height:38px;border-radius:50%;background:' + orgColor + '22;border:2px solid ' + orgColor + '44;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:' + orgColor + '" title="' + m.name + '">' + m.name.split(' ').map(w=>w[0]).join('').slice(0,2) + '</div>') + '</div>').join('') + (members.length>12?'<div style="width:38px;height:38px;border-radius:50%;background:var(--bg4);border:2px solid var(--ln2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--t2)">+' + (members.length-12) + '</div>':'') + '</div><div style="margin-top:8px;display:flex;flex-direction:column;gap:3px">' + members.slice(0,6).map(m=>'<div onclick="CharCard.show(\'' + m.id + '\',null,null,\'char\')" style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:7px;cursor:pointer;transition:background .1s" onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'transparent\'"><span style="color:var(--t1);font-size:12px;flex:1">' + m.name + '</span>' + ((m.rank||m.role)?'<span style="color:' + orgColor + ';font-size:10px;font-family:var(--mono)">' + (m.rank||m.role) + '</span>':'') + '</div>').join('') + (members.length>6?'<div style="color:var(--t3);font-size:11px;padding:4px 8px">+' + (members.length-6) + ' daha üye...</div>':'') + '</div></div>' : ''}
+      ${o.notes ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Notlar</div><div style="color:var(--t2);font-size:12px;background:var(--bg3);border-radius:8px;padding:10px;line-height:1.6">' + o.notes + '</div></div>' : ''}
+    </div>
+    <div style="padding:10px 14px;border-top:1px solid var(--ln);display:flex;gap:6px;flex-shrink:0;background:var(--bg2)">
+      <button onclick="CharCard.openInDB('${o.id}','organization')" style="flex:1;padding:8px;background:var(--bg4);border:1px solid var(--ln2);color:var(--t1);border-radius:8px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:5px" onmouseenter="this.style.background='var(--bg5)'" onmouseleave="this.style.background='var(--bg4)'"><i class="fas fa-external-link-alt" style="font-size:10px"></i>DB'de Aç</button>
     </div>`;
   },
 
+  // ── Mülk Kartı ──────────────────────────────────────
+  _propCard(p) {
+    const owner = S.ci?.get(p.owner_id) || S.chars?.find(c => String(c.id) === String(p.owner_id));
+    const img = p.image || p.photo;
+    const heroBg = img
+      ? 'background:url(\'' + img + '\') center/cover;min-height:150px;'
+      : 'background:linear-gradient(135deg,rgba(155,111,212,.2),rgba(155,111,212,.05));min-height:120px;display:flex;align-items:center;justify-content:center;';
+    return `
+    <div style="${heroBg}position:relative;border-radius:16px 16px 0 0;overflow:hidden;flex-shrink:0">
+      ${img ? '<div style="position:absolute;inset:0;background:linear-gradient(to bottom,rgba(0,0,0,.1),rgba(0,0,0,.7))"></div>' : '<div style="font-size:56px;opacity:.25">🏠</div>'}
+      <button onclick="CharCard.hide()" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.15);color:#fff;cursor:pointer;font-size:14px;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center">✕</button>
+      <div style="position:absolute;bottom:0;left:0;right:0;padding:12px 14px">
+        <div style="font-size:16px;font-weight:700;color:#fff;text-shadow:0 1px 4px #0008">${p.name}</div>
+        <div style="display:flex;gap:6px;margin-top:4px">
+          ${p.type ? '<span style="background:rgba(155,111,212,.3);color:#c084fc;border:1px solid rgba(155,111,212,.4);padding:2px 8px;border-radius:20px;font-size:10px;font-family:var(--mono)">' + p.type + '</span>' : ''}
+        </div>
+      </div>
+    </div>
+    <div style="overflow-y:auto;flex:1;padding:14px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        ${this._stat('Konum', p.address||p.location, 'fa-map-marker-alt')}
+        ${this._stat('Fiyat', p.price||p.rent, 'fa-dollar-sign')}
+        ${this._stat('Alan', p.area||p.size, 'fa-expand')}
+        ${this._stat('Durum', p.status, 'fa-info-circle')}
+      </div>
+      ${p.description ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Açıklama</div><div style="color:var(--t2);line-height:1.6;font-size:12px;background:var(--bg3);border-radius:8px;padding:10px">' + p.description + '</div></div>' : ''}
+      ${owner ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Sahip</div><div onclick="CharCard.show(\'' + owner.id + '\',null,null,\'char\')" style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border:1px solid var(--ln);border-radius:8px;cursor:pointer;transition:background .12s" onmouseenter="this.style.background=\'var(--bg4)\'" onmouseleave="this.style.background=\'var(--bg3)\'">' + (owner.image?'<img src="' + owner.image + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--ln2)">':'<div style="width:36px;height:36px;border-radius:50%;background:var(--bg4);border:2px solid var(--ln2);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--t1)">' + (owner.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2) + '</div>') + '<div><div style="font-size:13px;font-weight:600;color:var(--t0)">' + owner.name + '</div></div><i class="fas fa-chevron-right" style="margin-left:auto;color:var(--t3);font-size:10px"></i></div></div>' : ''}
+      ${p.notes ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Notlar</div><div style="color:var(--t2);font-size:12px;background:var(--bg3);border-radius:8px;padding:10px;line-height:1.6">' + p.notes + '</div></div>' : ''}
+    </div>
+    <div style="padding:10px 14px;border-top:1px solid var(--ln);display:flex;gap:6px;flex-shrink:0;background:var(--bg2)">
+      <button onclick="CharCard.openInDB('${p.id}','property')" style="flex:1;padding:8px;background:var(--bg4);border:1px solid var(--ln2);color:var(--t1);border-radius:8px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:5px" onmouseenter="this.style.background='var(--bg5)'" onmouseleave="this.style.background='var(--bg4)'"><i class="fas fa-external-link-alt" style="font-size:10px"></i>DB'de Aç</button>
+      <button onclick="const inp=document.getElementById('msg-input');if(inp){inp.value+='[Mülk:${(p.name||'').replace(/'/g,"\\'")}] ';inp.focus();}CharCard.hide();" style="flex:1;padding:8px;background:rgba(155,111,212,.15);border:1px solid rgba(155,111,212,.3);color:var(--pu);border-radius:8px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:5px"><i class="fas fa-tag" style="font-size:10px"></i>Mesaja Etiketle</button>
+    </div>`;
+  },
+
+  // ── Ekipman Kartı ───────────────────────────────────
+  _equipCard(e) {
+    const owner = S.ci?.get(e.owner_id) || S.chars?.find(c => String(c.id) === String(e.owner_id));
+    return `
+    <div style="background:linear-gradient(135deg,rgba(77,184,128,.2),rgba(77,184,128,.05));min-height:100px;position:relative;border-radius:16px 16px 0 0;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:14px">
+      <div style="font-size:52px;opacity:.25">📦</div>
+      <button onclick="CharCard.hide()" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.15);color:#fff;cursor:pointer;font-size:14px;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center">✕</button>
+      <div style="position:absolute;bottom:0;left:0;right:0;padding:12px 14px">
+        <div style="font-size:16px;font-weight:700;color:#fff">${e.name}</div>
+        ${e.type ? '<span style="background:rgba(77,184,128,.2);color:#4db880;border:1px solid rgba(77,184,128,.4);padding:2px 8px;border-radius:20px;font-size:10px;font-family:var(--mono)">' + e.type + '</span>' : ''}
+      </div>
+    </div>
+    <div style="overflow-y:auto;flex:1;padding:14px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        ${this._stat('Kategori', e.category, 'fa-tag')}
+        ${this._stat('Durum', e.status||e.condition, 'fa-info-circle')}
+        ${this._stat('Seri No', e.serial, 'fa-barcode')}
+        ${this._stat('Değer', e.value||e.price, 'fa-dollar-sign')}
+      </div>
+      ${e.description ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Açıklama</div><div style="color:var(--t2);line-height:1.6;font-size:12px;background:var(--bg3);border-radius:8px;padding:10px">' + e.description + '</div></div>' : ''}
+      ${owner ? '<div><div style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Sahip</div><div onclick="CharCard.show(\'' + owner.id + '\',null,null,\'char\')" style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border:1px solid var(--ln);border-radius:8px;cursor:pointer"><div style="flex:1;font-size:13px;font-weight:600;color:var(--t0)">' + owner.name + '</div><i class="fas fa-chevron-right" style="color:var(--t3);font-size:10px"></i></div></div>' : ''}
+    </div>
+    <div style="padding:10px 14px;border-top:1px solid var(--ln);display:flex;gap:6px;flex-shrink:0;background:var(--bg2)">
+      <button onclick="const inp=document.getElementById('msg-input');if(inp){inp.value+='[Ekipman:${(e.name||'').replace(/'/g,"\\'")}] ';inp.focus();}CharCard.hide();" style="flex:1;padding:8px;background:rgba(77,184,128,.15);border:1px solid rgba(77,184,128,.3);color:#4db880;border-radius:8px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:5px"><i class="fas fa-tag" style="font-size:10px"></i>Mesaja Etiketle</button>
+    </div>`;
+  },
+
+  // ── Generic ─────────────────────────────────────────
   _genericCard(e, type) {
     const entries = Object.entries(e).filter(([k,v]) => v && typeof v !== 'object' && !['id','created_at','updated_at'].includes(k));
-    return this._hdr(e.name || e.title || type, null, null, null) +
-    `<div style="padding:12px 14px;display:flex;flex-direction:column;gap:2px">
+    return `
+    <div style="background:var(--bg3);border-radius:16px 16px 0 0;padding:20px 14px 14px;border-bottom:1px solid var(--ln);position:relative;flex-shrink:0">
+      <button onclick="CharCard.hide()" style="position:absolute;top:10px;right:10px;background:rgba(255,255,255,.07);border:1px solid var(--ln2);color:var(--t2);cursor:pointer;font-size:14px;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center">✕</button>
+      <div style="font-size:16px;font-weight:700;color:var(--t0)">${e.name||e.title||type}</div>
+    </div>
+    <div style="overflow-y:auto;flex:1;padding:14px;display:flex;flex-direction:column;gap:4px">
       ${entries.map(([k,v]) => this._row(k, String(v))).join('')}
     </div>`;
   },
 
   _emptyCard(id, type) {
     const typeNames = {char:'Karakter', vehicle:'Araç', org:'Organizasyon', prop:'Mülk', equip:'Ekipman'};
-    return `<div style="padding:20px;text-align:center">
-      <div style="font-size:28px;margin-bottom:8px">🔍</div>
-      <div style="color:var(--t1);font-weight:600;margin-bottom:4px">${typeNames[type]||'Varlık'} bulunamadı</div>
-      <div style="color:var(--t3);font-size:11px">ID: ${id}</div>
-      <button onclick="CharCard.hide()" style="margin-top:12px;padding:6px 16px;background:var(--bg4);border:1px solid var(--ln2);border-radius:6px;color:var(--t2);cursor:pointer;font-size:11px">Kapat</button>
+    return `
+    <div style="padding:20px 14px;background:var(--bg3);border-radius:16px 16px 0 0;border-bottom:1px solid var(--ln);position:relative;flex-shrink:0">
+      <button onclick="CharCard.hide()" style="position:absolute;top:10px;right:10px;background:none;border:none;color:var(--t3);cursor:pointer;font-size:18px">✕</button>
+    </div>
+    <div style="padding:32px 20px;text-align:center;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px">
+      <div style="font-size:36px;opacity:.4">🔍</div>
+      <div style="color:var(--t1);font-weight:600;font-size:14px">${typeNames[type]||'Varlık'} bulunamadı</div>
+      <div style="color:var(--t3);font-size:11px;font-family:var(--mono)">ID: ${id}</div>
+      <button onclick="CharCard.hide()" style="margin-top:8px;padding:7px 18px;background:var(--bg4);border:1px solid var(--ln2);border-radius:8px;color:var(--t2);cursor:pointer;font-size:12px">Kapat</button>
     </div>`;
   },
 
+  // ── Helpers ─────────────────────────────────────────
+  _stat(label, value, icon) {
+    if (!value && value !== 0) return '';
+    return '<div style="background:var(--bg3);border:1px solid var(--ln);border-radius:8px;padding:8px 10px"><div style="display:flex;align-items:center;gap:5px;margin-bottom:3px"><i class="fas ' + icon + '" style="font-size:9px;color:var(--t3);width:10px"></i><span style="font-family:var(--mono);font-size:9px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase">' + label + '</span></div><div style="color:var(--t0);font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + value + '</div></div>';
+  },
+
+  _row(label, value) {
+    if (!value && value !== 0) return '';
+    return '<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--ln)"><span style="color:var(--t3);min-width:80px;flex-shrink:0;font-size:11px">' + label + '</span><span style="color:var(--t1);flex:1;font-size:12px">' + value + '</span></div>';
+  },
+
   openInDB(id, type) {
-    // Open NYC_DB in a new tab pointing to this entity
     const base = 'https://cesurakincan25-design.github.io/NYC_DB/';
     window.open(base + '?type=' + type + '&id=' + id, '_blank');
   }
