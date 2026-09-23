@@ -2001,8 +2001,20 @@ const UI={
     t=t.replace(/\[([A-Za-zÇĞİÖŞÜçğışöü0-9!?\s]{1,6})\]/g,(_,tag)=>`<span class="tag-badge">${tag.trim()}</span>`);
     /* [uzun köşeli] → emote */
     t=t.replace(/\[([^\]]{7,300})\]/g,(_,inner)=>`<span class="emote">[${inner}]</span>`);
+    /* **bold** */
+    t=t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
     /* *yıldız* */
     t=t.replace(/\*(.*?)\*/g,'<em style="color:var(--t2)">*$1*</em>');
+    /* **İsim:** bold diyalog prefix — tıklanabilir */
+    t=t.replace(/^<strong>([A-Za-zÇĞİÖŞÜçğışöü][A-Za-zÇĞİÖŞÜçğışöü\s\.]{1,30}):<\/strong>\s?/gm,(m,name)=>{
+      const key=name.trim().toLowerCase();
+      const char=S.cni?.get(key)||null;
+      if(!char)return `<strong>${name}:</strong> `;
+      return `<strong><span class="speaker" data-char-id="${char.id||''}" `+
+        `onclick="if(typeof CharCard!=='undefined')CharCard.show('${char.id||''}',event.clientX,event.clientY)" `+
+        `oncontextmenu="event.preventDefault();UI.charContextMenu(event,'${char.id||''}','${name.trim().replace(/'/g,"\\'")}')">`+
+        `${name}:</span></strong> `;
+    });
     /* Karakter: diyalog — tıklanabilir isim */
     t=t.replace(/^([A-Za-zÇĞİÖŞÜçğışöü][A-Za-zÇĞİÖŞÜçğışöü\s\.]{1,30}):\s/gm,(m,name)=>{
       const key=name.trim().toLowerCase();
