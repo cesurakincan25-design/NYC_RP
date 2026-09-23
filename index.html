@@ -3707,6 +3707,12 @@ const MasterAgent = {
       '    ÖRNEK: SEND_MSG:{"content":"10-4, yolda.","char_name":"Devriye 7","org_name":"NYPD"}',
       '  → Birden fazla karakter için birden fazla SEND_MSG kullanabilirsin.',
       '',
+      'SAVE_NPC:{"name":"Ad","alias":"Takma Ad","occupation":"Meslek","age":"35","gender":"Erkek","backstory":"Kısa geçmiş","personality":"Karakter özellikleri","org_id":"ORG_ID","tags":["npc"]}',
+      '  → Spontane oluşturduğun bir NPC\'yi kalıcı olarak karakterler veritabanına kaydeder.',
+      '  → Kullanıcı "bunu kaydet" veya "bu karakteri sakla" dediğinde kullan.',
+      '  → Kaydettikten sonra bir sonraki SEND_MSG\'de char_id olarak yeni ID\'yi kullanabilirsin.',
+      '  → org_id ve alias opsiyoneldir.',
+      '',
       '== AKTİF KARİŞTERLER (char_id gereken mevcut karakterler) ==',
       (S.chars||[]).filter(c=>c.status!=='Deceased').slice(0,30).map(c=>
         `  char_id:"${c.id}" | ${c.name}${c.alias?' ('+c.alias+')':''}`
@@ -3792,6 +3798,47 @@ const MasterAgent = {
     if (dispatchMatch && DMPanel?.openGenerateDispatch) {
       DMPanel.openGenerateDispatch(dispatchMatch[1]);
       results.push('✅ Dispatch modalı açıldı.');
+    }
+
+    // SAVE_NPC:{ JSON } — save a spontaneous NPC to the characters collection
+    const saveNpcMatch = text.match(/SAVE_NPC:(\{[\s\S]*?\})/);
+    if (saveNpcMatch) {
+      try {
+        const p = JSON.parse(saveNpcMatch[1]);
+        if (!p.name?.trim()) throw new Error('NPC adı boş');
+
+        // Build a minimal character record
+        const newChar = {
+          name:        p.name.trim(),
+          alias:       p.alias || '',
+          image:       p.image || p.avatar || '',
+          status:      p.status || 'Active',
+          backstory:   p.backstory || p.description || '',
+          personality: p.personality || '',
+          occupation:  p.occupation || '',
+          age:         p.age || '',
+          gender:      p.gender || '',
+          organizations: p.org_id ? [p.org_id] : [],
+          tags:        p.tags || ['npc', 'ma-generated'],
+          created_by:  'master_agent',
+          created_at:  new Date().toISOString(),
+        };
+
+        // Write to Firestore characters sub-collection (not nyc_db/main — that's a snapshot)
+        const charRef = await DB.post('characters', newChar);
+        const newId = charRef?.id || ('npc_' + Date.now());
+        newChar.id = newId;
+
+        // Also inject into in-memory S.chars so it's immediately usable
+        if (!S.chars) S.chars = [];
+        S.chars.push(newChar);
+        S.ci?.set(newId, newChar);
+        S.cni?.set(newChar.name.toLowerCase(), newId);
+
+        results.push(`✅ NPC kaydedildi → "${newChar.name}" (ID: ${newId}) — artık SEND_MSG'de char_id olarak kullanılabilir.`);
+      } catch(e) {
+        results.push('❌ NPC kaydedilemedi: ' + e.message);
+      }
     }
 
     // SEND_MSG:{ JSON } — send a message to the RP room
