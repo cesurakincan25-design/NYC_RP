@@ -126,6 +126,18 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 .mention-tag:hover{background:rgba(74,143,226,.32)}
 .mention-tag.mention-everyone{background:rgba(232,167,74,.18);color:#e8a74a}
 .msg-row.mentioned{background:rgba(232,167,74,.07);border-left:2px solid #e8a74a;margin-left:-2px;padding-left:2px}
+/* Mesaj stilleri */
+.msg-emote{color:#9b6fd4;font-style:italic}
+.msg-ooc{color:#a89040;font-style:italic;opacity:.75}
+.msg-ooc::before,.msg-ooc::after{content:''}
+.msg-strike{opacity:.55}
+.msg-underline{text-decoration:underline}
+.msg-code{font-family:var(--mono);font-size:12px;background:var(--bg4);border-radius:3px;padding:1px 5px;color:#c084fc}
+/* Format toolbar (input alanı üstü) */
+.fmt-toolbar{display:flex;gap:4px;padding:4px 8px;border-top:1px solid var(--ln);background:var(--bg1);flex-shrink:0}
+.fmt-btn{width:26px;height:26px;border:none;background:none;color:var(--t2);cursor:pointer;border-radius:4px;font-size:12px;font-family:var(--mono);display:flex;align-items:center;justify-content:center;transition:color .12s,background .12s;flex-shrink:0}
+.fmt-btn:hover{color:var(--t0);background:var(--bg4)}
+.fmt-sep{width:1px;background:var(--ln2);margin:3px 2px;flex-shrink:0}
 .btn-icon{width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:var(--t3);cursor:pointer;border-radius:var(--r);font-size:13px;border:none;background:none;transition:color var(--tr),background var(--tr)}
 .btn-icon:hover{color:var(--t0);background:var(--bg4)}
 #sb-footer{border-top:1px solid var(--ln);padding:10px 14px;flex-shrink:0}
@@ -557,6 +569,15 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
         <button class="tb-btn" onclick="RP.promptAttach()" title="Resim ekle"><i class="fas fa-image"></i></button>
         <button class="tb-btn" id="btn-rpt-override" title="RP Zamanı override" onclick="const b=document.getElementById('rp-time-override-bar');const shown=b.style.display==='flex';b.style.display=shown?'none':'flex';if(!shown){const st=RpTime._state[S.roomId];if(st)document.getElementById('rp-time-override-inp').placeholder=RpTime.fmt(st)+' (boş = otomatik)';document.getElementById('rp-time-override-inp').focus();}"><i class="fas fa-clock" style="color:var(--pu);opacity:.7"></i></button>
         <button class="tb-btn" id="ac-toggle-btn" title="Otomatik tamamlama aç/kapat" onclick="Autocomplete.toggleEnabled()" style="font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.04em;color:var(--t2)">AC</button>
+        <!-- Format buttons -->
+        <span style="width:1px;background:var(--ln2);margin:4px 3px;align-self:stretch;flex-shrink:0"></span>
+        <button class="tb-btn" title="Kalın (**metin**)" onclick="RP.wrapFmt('**','**')" style="font-weight:700;font-size:11px">B</button>
+        <button class="tb-btn" title="İtalik (_metin_)" onclick="RP.wrapFmt('_','_')" style="font-style:italic;font-size:11px">i</button>
+        <button class="tb-btn" title="Üstü çizili (~~metin~~)" onclick="RP.wrapFmt('~~','~~')" style="font-size:10px;text-decoration:line-through">S</button>
+        <button class="tb-btn" title="Altı çizili (__metin__)" onclick="RP.wrapFmt('__','__')" style="font-size:10px;text-decoration:underline">U</button>
+        <button class="tb-btn" title="Emote (*aksiyon*)" onclick="RP.wrapFmt('*','*')" style="color:var(--pu);font-style:italic;font-size:11px">*e*</button>
+        <button class="tb-btn" title="OOC yorum ((( metin )))" onclick="RP.wrapFmt('(( ',' ))')" style="color:#a89040;font-size:10px;font-family:var(--mono)">OOC</button>
+        <button class="tb-btn" title="Kod (`metin`)" onclick="RP.wrapFmt('\`','\`')" style="font-family:var(--mono);font-size:10px;color:#c084fc">`k`</button>
         <span class="tb-spc"></span>
         <button id="send-btn" onclick="RP.send()"><i class="fas fa-paper-plane"></i> SEND</button>
       </div>
@@ -1125,6 +1146,44 @@ const DB={
     console.warn('[DB.patch] Unknown table:',table);return[];
   },
 
+  // ── delete(table, qs) ── hard delete ────────────────
+  async delete(table,qs){
+    const {db,fs}=await this._getFs();
+    const {doc,deleteDoc,collection,query,where,getDocs,writeBatch}=fs;
+    const q=this._parseQ(qs);
+
+    if(table==='rp_messages'){
+      const idVal=q.filters.id;
+      if(idVal){
+        // Oda ID'yi bul (önce mevcut oda, sonra tüm odalar)
+        const roomId=q.filters.room_id||window.S?.roomId;
+        if(roomId){
+          try{await deleteDoc(doc(db,'rp_rooms',String(roomId),'messages',String(idVal)));return;}catch(e){}
+        }
+        // Fallback: tüm odalarda ara
+        for(const room of(window.S?.rooms||[])){
+          try{
+            await deleteDoc(doc(db,'rp_rooms',String(room.id),'messages',String(idVal)));
+            return;
+          }catch(e){}
+        }
+      }
+    }
+    if(table==='rp_rooms'){
+      const idVal=q.filters.id;
+      if(idVal){
+        // Önce alt koleksiyonları temizle
+        try{
+          const msgsSnap=await getDocs(collection(db,'rp_rooms',String(idVal),'messages'));
+          const batch=writeBatch(db);
+          msgsSnap.forEach(d=>batch.delete(d.ref));
+          await batch.commit();
+        }catch(e){}
+        await deleteDoc(doc(db,'rp_rooms',String(idVal))).catch(()=>{});
+      }
+    }
+  },
+
   // ── upsert(table, conflictKey, body) ────────────────
   async upsert(table,onConflict,body){
     const {db,fs}=await this._getFs();
@@ -1357,10 +1416,10 @@ const RP={
     if(S.msgs[S.roomId])
       S.msgs[S.roomId]=S.msgs[S.roomId].filter(m=>m.id!=id);
     document.querySelector(`[data-msg-id="${id}"]`)?.remove();
-    // Patch DB — realtime PATCH event will propagate to others
+    // Hard delete — Firestore'dan gerçekten sil, realtime 'removed' event ile diğer kullanıcılara yayılır
     if(!S._off){
       try{
-        await DB.patch('rp_messages',`id=eq.${id}`,{is_deleted:true});
+        await DB.delete('rp_messages',`id=eq.${id}&room_id=eq.${S.roomId}`);
       }catch(e){ toast('Silinemedi','error'); }
     }
   },
@@ -1632,6 +1691,23 @@ const RP={
     }).catch(()=>{});
   },
   /* misc */
+  /* Wrap selected text (or insert placeholder) with prefix+suffix */
+  wrapFmt(pre, suf) {
+    const inp = document.getElementById('msg-input');
+    if (!inp) return;
+    const start = inp.selectionStart, end = inp.selectionEnd;
+    const sel = inp.value.slice(start, end) || 'metin';
+    const before = inp.value.slice(0, start);
+    const after  = inp.value.slice(end);
+    inp.value = before + pre + sel + suf + after;
+    // Reselect the inner content
+    const ns = before.length + pre.length;
+    const ne = ns + sel.length;
+    inp.setSelectionRange(ns, ne);
+    inp.focus();
+    // Trigger auto-resize
+    inp.dispatchEvent(new Event('input'));
+  },
   toggleEmoji(e){
     e.stopPropagation();document.getElementById('emoji-popup')?.remove();
     const w=document.createElement('div');w.id='emoji-popup';w.className='emoji-wrap';
@@ -1717,9 +1793,14 @@ const RT={
               this._handleMsg(data,/*notify=*/true);
             }
           }
+          if(change.type==='removed'){
+            // Hard delete — Firestore'dan silindi, diğer kullanıcılarda da kaldır
+            Object.keys(S.msgs).forEach(rid=>{S.msgs[rid]=S.msgs[rid].filter(m=>m.id!=data.id);});
+            document.querySelector(`[data-msg-id="${data.id}"]`)?.remove();
+          }
           if(change.type==='modified'){
             if(data.is_deleted){
-              // Soft-delete: remove from all caches & DOM
+              // Soft-delete fallback (eski mesajlar için)
               Object.keys(S.msgs).forEach(rid=>{S.msgs[rid]=S.msgs[rid].filter(m=>m.id!=data.id);});
               document.querySelector(`[data-msg-id="${data.id}"]`)?.remove();
             }else{
@@ -2076,10 +2157,24 @@ const UI={
     t=t.replace(/\[([A-Za-zÇĞİÖŞÜçğışöü0-9!?\s]{1,6})\]/g,(_,tag)=>`<span class="tag-badge">${tag.trim()}</span>`);
     /* [uzun köşeli] → emote */
     t=t.replace(/\[([^\]]{7,300})\]/g,(_,inner)=>`<span class="emote">[${inner}]</span>`);
+    /* (( OOC )) — role dışı, mat sarı */
+    t=t.replace(/\(\((.+?)\)\)/gs,'<span class="msg-ooc">(($1))</span>');
+
+    /* Zengin biçimlendirme */
+    /* ~~üstü çizili~~ */
+    t=t.replace(/~~(.+?)~~/g,'<s class="msg-strike">$1</s>');
+    /* __altı çizili__ */
+    t=t.replace(/__(.+?)__/g,'<u class="msg-underline">$1</u>');
     /* **bold** */
     t=t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
-    /* *yıldız* */
-    t=t.replace(/\*(.*?)\*/g,'<em style="color:var(--t2)">*$1*</em>');
+    /* _italic_ (tek alt çizgi) */
+    t=t.replace(/_([^_]+)_/g,'<em>$1</em>');
+    /* `kod` */
+    t=t.replace(/`([^`]+)`/g,'<code class="msg-code">$1</code>');
+    /* Renkli yazı: [renk|metin] örn. [#e05555|Dikkat!] ya da [red|metin] */
+    t=t.replace(/\[([#a-zA-Z][a-zA-Z0-9#]{1,20})\|([^\]]+)\]/g,'<span style="color:$1">$2</span>');
+    /* *emote* (tek yıldız) → mat mor italik, yıldızlar korunur */
+    t=t.replace(/\*([^*\n]+)\*/g,'<em class="msg-emote">*$1*</em>');
     /* **İsim:** bold diyalog prefix — tıklanabilir */
     t=t.replace(/^<strong>([A-Za-zÇĞİÖŞÜçğışöü][A-Za-zÇĞİÖŞÜçğışöü\s\.]{1,30}):<\/strong>\s?/gm,(m,name)=>{
       const key=name.trim().toLowerCase();
@@ -3016,7 +3111,7 @@ const OAI={
         return `[${t}${rpT}] ${m.char_name}${m.char_alias?` "${m.char_alias}"`:''}${m.org_name?` [${m.org_name}]`:''}: ${m.content}`;
       }).join('\n');
       const worldCtx=this._worldSnapshot?`\nWORLD CONTEXT (NYC_DB — read only, for reference):\n${this._worldSnapshot}\n`:'';
-      const prompt=`You are NYC_DB Observer AI. Observe only. Return ONLY valid JSON.${worldCtx}\nINVOLVED CHARACTERS:\n${charLines||'(unknown)'}\nINVOLVED ORGANIZATIONS:\n${orgLines||'(none)'}\nTRANSCRIPT (${messages.length} messages):\n${tr}\nRespond:{"session_summary":{"title":"","summary":"","involved_chars":[],"involved_orgs":[],"significance":"low"},"incidents":[{"title":"","incident_type":"confrontation","severity":"low","description":"","location_name":"","involved_chars":[],"involved_orgs":[],"source_confidence":0.0}],"character_memories":[{"char_id":"","char_name":"","memory_type":"event","title":"","content":"","emotional_tag":"neutral","importance":50,"about_chars":[]}],"relationship_changes":[{"entity_a_id":"","entity_a_name":"","entity_a_type":"character","entity_b_id":"","entity_b_name":"","entity_b_type":"character","change_type":"neutral","direction":"mutual","trust_delta":0,"description":""}],"flags":{"requires_admin_review":false,"review_reason":""}}`;
+      const prompt=`You are NYC_DB Observer AI. Observe only. Return ONLY valid JSON.${worldCtx}\nMESSAGE FORMAT NOTE: *text* = IC emote/action (purple italic), (( text )) = OOC comment (ignore for IC analysis), **text** = bold, _text_ = italic, ~~text~~ = strikethrough, [color|text] = colored text, @name = player mention. Strip formatting marks when extracting character dialogue/actions for summaries.\nINVOLVED CHARACTERS:\n${charLines||'(unknown)'}\nINVOLVED ORGANIZATIONS:\n${orgLines||'(none)'}\nTRANSCRIPT (${messages.length} messages):\n${tr}\nRespond:{"session_summary":{"title":"","summary":"","involved_chars":[],"involved_orgs":[],"significance":"low"},"incidents":[{"title":"","incident_type":"confrontation","severity":"low","description":"","location_name":"","involved_chars":[],"involved_orgs":[],"source_confidence":0.0}],"character_memories":[{"char_id":"","char_name":"","memory_type":"event","title":"","content":"","emotional_tag":"neutral","importance":50,"about_chars":[]}],"relationship_changes":[{"entity_a_id":"","entity_a_name":"","entity_a_type":"character","entity_b_id":"","entity_b_name":"","entity_b_type":"character","change_type":"neutral","direction":"mutual","trust_delta":0,"description":""}],"flags":{"requires_admin_review":false,"review_reason":""}}`;
       // Shared Gemini REST — Firebase AI Logic artık kullanılmıyor
       const parsed = await _geminiGenerate(prompt, { json:true, temperature:0.2, topP:0.8, maxOutputTokens:2048 });
       if(!this.CFG.DRY_RUN){
@@ -4537,6 +4632,19 @@ const MasterAgent = {
       '  → Kullanıcı "bunu kaydet" veya "bu karakteri sakla" dediğinde kullan.',
       '  → Kaydettikten sonra bir sonraki SEND_MSG\'de char_id olarak yeni ID\'yi kullanabilirsin.',
       '  → org_id ve alias opsiyoneldir.',
+      '',
+      '== MESAJ BİÇİMLENDİRME ==',
+      'SEND_MSG içinde bu markdown sözdizimini kullanabilirsin — sistem otomatik render eder:',
+      '  *aksiyon metni*       → mor italik emote (karakter fiziksek eylem)',
+      '  (( yorum ))           → OOC sarı — rol dışı açıklama (genellikle NA kullan)',
+      '  **kalın metin**       → kalın vurgu',
+      '  _italik metin_        → italik vurgu',
+      '  ~~üstü çizili~~       → üstü çizili metin',
+      '  __altı çizili__       → altı çizili metin',
+      '  `kod`                 → mono kod bloğu',
+      '  [renk|metin]          → renkli metin (örn: [#e05555|UYARI] veya [red|dur])',
+      '  @KarakterAdı          → oyuncu/karakter etiket (bildirim gönderir)',
+      'ÖRNEK: SEND_MSG:{"content":"*Yavaşça öne çıkar ve ellerini havaya kaldırır.* Kaçmıyorum, sakin ol.","char_name":"Marcus Webb"}',
       '',
       '== ETİKET SİSTEMİ ==',
       'RP mesajlarında [Karakter:İsim], [Araç:İsim], [Org:İsim], [Mülk:İsim] etiketleri kullanılır.',
