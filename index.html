@@ -1480,6 +1480,9 @@ const RP={
     document.getElementById('loader').classList.add('hidden');
     setInterval(()=>RP._hb(),15000);
     setInterval(()=>RT._presence(),3000);
+    // Gerçek zamanlı oda listesi ve OAI durum dinleyicileri
+    RT.watchRooms();
+    RT.watchOAIState();
   },
   _dfRooms(){
     S.rooms=[
@@ -1509,12 +1512,25 @@ const RP={
         UI.renderRoom(id);
       }catch(e){console.warn('[RP] msgs:',e.message);}
     }
-    RT.connect(id);
+    // RT bağlantısı kur; hata alırsa 2s sonra bir kez daha dene (F5 sonrası Firebase hazır değilse)
+    try{
+      await RT.connect(id);
+    }catch(e){
+      console.warn('[RP] RT.connect failed, retrying in 2s…',e.message);
+      setTimeout(()=>RT.connect(id),2000);
+    }
   },
   async send(){
     const inp=document.getElementById('msg-input');
     const txt=inp.value.trim();
     if(!txt&&!S.attach)return;
+    // F5 sonrası S.roomId null kalabilir — guard + reconnect
+    if(!S.roomId){
+      const live=S.rooms.find(r=>r.slug==='live')||S.rooms[0];
+      if(live){await RP.switchRoom(live.id);}else{toast('Önce bir odaya gir','error');return;}
+    }
+    // RT bağlantısı yoksa yeniden bağlan
+    if(!RT._unsubMsg&&S.roomId){RT.connect(S.roomId);}
     // Hangi karakterle gönderilecek: metin "İsim: ..." içeriyorsa ilk satırdaki ismi bul
     // Aksi takdirde S.activeChar var mı bak, yoksa kullanıcı adını kullan
     let sendChar=S.activeChar||null;
@@ -2036,8 +2052,72 @@ const RT={
   _unsubMsg:null,     // onSnapshot unsubscribe for messages
   _unsubPresence:null,// onSnapshot unsubscribe for presence
   _unsubDM:null,      // onSnapshot unsubscribe for DM messages
+  _unsubRooms:null,   // onSnapshot unsubscribe for room list
+  _unsubOAI:null,     // onSnapshot unsubscribe for OAI state
   _presenceTimer:null,
   _seenIds:new Set(), // avoid duplicate handling on initial snapshot
+
+  // ── Rooms realtime listener ─────────────────────────────
+  async watchRooms(){
+    if(this._unsubRooms){try{this._unsubRooms();}catch(e){} this._unsubRooms=null;}
+    try{
+      const {db,fs}=await _fbReady();
+      const {collection,query,orderBy,onSnapshot}=fs;
+      const ref=collection(db,'rp_rooms');
+      const q=query(ref,orderBy('sort_order','asc'));
+      let first=true;
+      this._unsubRooms=onSnapshot(q,snap=>{
+        if(first){first=false;return;} // initial load zaten RP.init()'de yapıldı
+        let changed=false;
+        snap.docChanges().forEach(change=>{
+          const data={...change.doc.data(),id:change.doc.id};
+          if(change.type==='added'){
+            if(!S.rooms.find(r=>r.id==data.id)){S.rooms.push(data);changed=true;}
+          }
+          if(change.type==='modified'){
+            const idx=S.rooms.findIndex(r=>r.id==data.id);
+            if(idx>=0){S.rooms[idx]={...S.rooms[idx],...data};changed=true;}
+          }
+          if(change.type==='removed'){
+            S.rooms=S.rooms.filter(r=>r.id!=data.id);changed=true;
+          }
+        });
+        if(changed) UI.renderRooms();
+      },err=>console.warn('[RT] rooms onSnapshot error:',err));
+    }catch(e){console.warn('[RT] watchRooms error:',e);}
+  },
+
+  // ── OAI state realtime listener (kullanıcılar arası senkron) ──
+  async watchOAIState(){
+    if(this._unsubOAI){try{this._unsubOAI();}catch(e){} this._unsubOAI=null;}
+    try{
+      const {db,fs}=await _fbReady();
+      const {doc,onSnapshot}=fs;
+      const ref=doc(db,'rp_config','oai_state');
+      this._unsubOAI=onSnapshot(ref,snap=>{
+        if(!snap.exists())return;
+        const data=snap.data();
+        const wasRunning=OAI.running;
+        if(data.running && !OAI.running){
+          OAI.running=true;
+          OAI._sessionOnlyMode=!!data.sessionOnly;
+          const p=document.getElementById('ai-pill');
+          if(p){p.classList.add('on');document.getElementById('ai-pill-txt').textContent='AI ON';}
+          // Admin panel butonları güncelle
+          document.getElementById('obs-start')?.style && (document.getElementById('obs-start').style.display='none');
+          document.getElementById('obs-session-start')?.style && (document.getElementById('obs-session-start').style.display='none');
+          document.getElementById('obs-stop')?.style && (document.getElementById('obs-stop').style.display='');
+        } else if(!data.running && OAI.running){
+          OAI.running=false;
+          const p=document.getElementById('ai-pill');
+          if(p){p.classList.remove('on','thinking');document.getElementById('ai-pill-txt').textContent='AI OFF';}
+          document.getElementById('obs-start')?.style && (document.getElementById('obs-start').style.display='');
+          document.getElementById('obs-session-start')?.style && (document.getElementById('obs-session-start').style.display='');
+          document.getElementById('obs-stop')?.style && (document.getElementById('obs-stop').style.display='none');
+        }
+      },err=>console.warn('[RT] OAI state onSnapshot error:',err));
+    }catch(e){console.warn('[RT] watchOAIState error:',e);}
+  },
 
   async connect(roomId){
     this.disconnect();
@@ -2126,6 +2206,8 @@ const RT={
     if(this._unsubPresence){try{this._unsubPresence();}catch(e){} this._unsubPresence=null;}
     if(this._unsubDM){try{this._unsubDM();}catch(e){} this._unsubDM=null;}
     clearInterval(this._presenceTimer);this._presenceTimer=null;
+    // NOT: _unsubRooms ve _unsubOAI kasıtlı disconnect'te kapatılmıyor
+    // çünkü oda listesi ve OAI durumu kullanıcı oturumdayken hep dinlenmeli
   },
 
   // Global listener: tracks new messages in ALL rooms for unread badges
@@ -2953,8 +3035,11 @@ const ContextMenu = {
 };
 window.ContextMenu = ContextMenu;
 
-/* ═══ CHAR / ENTITY CARD ════════════════════════════════ */
-var CharCard = {
+/* ═══ CHAR / ENTITY CARD — rp_features.js tarafından sağlanır ════════════════════════════════ */
+/* CharCard objesi rp_features.js içinde const olarak tanımlı.
+   _npcPopup ve openInDB patch'leri aşağıdaki <script> bloğuna taşındı (rp_features.js sonrası).
+   AŞAĞI_BAS_BAŞLANGICI */
+var _charCardPlaceholder = {
   _el: null,
   _overlay: null,
 
@@ -3609,11 +3694,21 @@ const OAI={
     Adm.setSt('active','Active');
     const p=document.getElementById('ai-pill');p.classList.add('on');document.getElementById('ai-pill-txt').textContent='AI ON';
     toast('Observer AI başlatıldı','success');
+    // Firestore'a OAI state yaz — diğer kullanıcılara senkronize et
+    _fbReady().then(({db,fs})=>{
+      const {doc,setDoc}=fs;
+      setDoc(doc(db,'rp_config','oai_state'),{running:true,sessionOnly:!!this._sessionOnlyMode,startedBy:S.user?.name||'admin',startedAt:new Date().toISOString()}).catch(()=>{});
+    });
   },
   stop(){
     this.running=false;this.Batcher.buf=[];clearTimeout(this.Batcher.ft);clearTimeout(this.Batcher.it);
     Adm.setSt('','Offline');
     const p=document.getElementById('ai-pill');p.classList.remove('on','thinking');document.getElementById('ai-pill-txt').textContent='AI OFF';
+    // Firestore'a OAI state yaz — diğer kullanıcılara senkronize et
+    _fbReady().then(({db,fs})=>{
+      const {doc,setDoc}=fs;
+      setDoc(doc(db,'rp_config','oai_state'),{running:false,stoppedBy:S.user?.name||'admin',stoppedAt:new Date().toISOString()}).catch(()=>{});
+    });
   },
   async process(messages){
     this.stats.runs++;this.stats.msgs+=messages.length;this.stats.lastRun=new Date().toISOString();
