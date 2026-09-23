@@ -456,6 +456,13 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 #toast-con{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:999;display:flex;flex-direction:column-reverse;gap:6px;pointer-events:none}
 .toast{background:var(--bg3);border:1px solid var(--ln2);color:var(--t0);font-family:var(--mono);font-size:12px;padding:10px 16px;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.5);animation:tin .25s ease;pointer-events:all;white-space:nowrap}
 .toast.success{border-color:var(--gn);color:var(--gn)}.toast.error{border-color:var(--rd);color:var(--rd)}.toast.warn{border-color:var(--am);color:var(--am)}
+/* NSFW toggle */
+#nsfw-toggle.nsfw-on{background:var(--rd-d);color:var(--rd);border:1px solid var(--rd)}
+#input-box.nsfw-active{border-color:var(--rd)!important}
+.msg-nsfw-badge{display:inline-flex;align-items:center;font-family:var(--mono);font-size:9px;font-weight:700;padding:1px 5px;border-radius:2px;background:rgba(224,85,85,.15);color:var(--rd);border:1px solid rgba(224,85,85,.35);letter-spacing:.06em;text-transform:uppercase;margin:0 4px 2px 0;vertical-align:middle}
+/* Media embed cards */
+.media-embed{margin-top:6px;border-radius:8px;overflow:hidden;display:block;border:1px solid var(--ln)}
+.room-unread-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--rd);color:#fff;font-size:10px;font-weight:700;font-family:var(--mono);margin-left:auto;margin-right:4px;flex-shrink:0}
 @keyframes tin{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
 /* mobile */
 @media(max-width:768px){
@@ -564,6 +571,7 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
         <button class="tb-btn" title="Emote (*aksiyon*)" onclick="RP.wrapFmt('*','*')" style="color:var(--pu);font-style:italic;font-size:11px">*e*</button>
         <button class="tb-btn" title="OOC yorum ((( metin )))" onclick="RP.wrapFmt('(( ',' ))')" style="color:#a89040;font-size:10px;font-family:var(--mono)">OOC</button>
         <button class="tb-btn" title="Kod (`metin`)" onclick="RP.wrapFmt('\`','\`')" style="font-family:var(--mono);font-size:10px;color:#c084fc">`k`</button>
+        <button class="tb-btn" id="nsfw-toggle" title="NSFW / Hassas İçerik — AI'a gönderilmez" onclick="RP.toggleNSFW()" style="font-size:14px">🔞</button>
         <span class="tb-spc"></span>
         <button id="send-btn" onclick="RP.send()"><i class="fas fa-paper-plane"></i> SEND</button>
       </div>
@@ -1198,6 +1206,7 @@ const S={
   user:null,activeChar:null,activeChars:[],
   presence:{},typing:{},attach:null,reply:null,_off:false,
   playerProfiles:{},  // { userId: profileObj }
+  unread:{},          // { roomId: count }
 };
 
 /* ═══ LOGIN ════════════════════════════════════════════ */
@@ -1247,6 +1256,8 @@ const Login={
 };
 
 /* ═══ RP ════════════════════════════════════════════════ */
+// NSFW state — mesajın AI'a gönderilip gönderilmeyeceğini belirler
+let _nsfwMode = false;
 const RP={
   async init(){
     document.getElementById('loader').classList.remove('hidden');
@@ -1283,6 +1294,8 @@ const RP={
     ];
   },
   async switchRoom(id){
+    // Clear unread badge for this room
+    if(S.unread&&S.unread[id]){delete S.unread[id];UI.renderRooms();}
     S.roomId=id;S.typing={};RT.lastId=null;
     const room=S.rooms.find(r=>r.id==id);
     if(room){document.getElementById('room-title').textContent=room.name;document.getElementById('room-desc').textContent=room.description||'';}
@@ -1337,11 +1350,14 @@ const RP={
       reply_to_sender:S.reply?.char_name||null,
       reply_to_content:S.reply?.content?.slice(0,100)||null,
       sent_by_user:S.user?.id||null,
+      is_nsfw:_nsfwMode||false,  // NSFW mesajlar AI'a gönderilmez
       rp_time:null // will be set after await below
     };
     // Await rp_time (usually instant — state already in memory)
     try{pl.rp_time=await rpTimePromise;}catch(e){}
     inp.value='';inp.style.height='auto';S.attach=null;RP.clearReply();RP.clearTyping();
+    // Reset NSFW mode after send
+    if(_nsfwMode){_nsfwMode=false;document.getElementById('nsfw-toggle')?.classList.remove('nsfw-on');document.getElementById('input-box')?.classList.remove('nsfw-active');}
     if(S._off){
       const loc={...pl,id:'local_'+Date.now(),created_at:new Date().toISOString()};
       if(!S.msgs[S.roomId])S.msgs[S.roomId]=[];
@@ -1789,7 +1805,22 @@ const RP={
     toast('Resim eklendi','success');
   },
   confirmAttach(){this._confirmAttachInline();},
-  _org(id){return id?S.oi.get(id)||null:null;}
+  _org(id){return id?S.oi.get(id)||null:null;},
+
+  /* ── NSFW toggle ─────────────────────────────────────── */
+  toggleNSFW(){
+    _nsfwMode=!_nsfwMode;
+    const btn=document.getElementById('nsfw-toggle');
+    const box=document.getElementById('input-box');
+    if(_nsfwMode){
+      btn?.classList.add('nsfw-on');
+      box?.classList.add('nsfw-active');
+      toast('🔞 NSFW modu açık — bu mesaj AI\'a gönderilmez','warn');
+    }else{
+      btn?.classList.remove('nsfw-on');
+      box?.classList.remove('nsfw-active');
+    }
+  },
 };
 
 /* ═══ REALTIME (Firebase onSnapshot) ════════════════════ */
@@ -1890,6 +1921,36 @@ const RT={
     clearInterval(this._presenceTimer);this._presenceTimer=null;
   },
 
+  // Global listener: tracks new messages in ALL rooms for unread badges
+  // Only fires for messages sent by others while we are in a different room
+  async connectGlobal(){
+    if(this._unsubGlobal){try{this._unsubGlobal();}catch(e){} this._unsubGlobal=null;}
+    try{
+      const {db,fs}=await _fbReady();
+      const {collectionGroup,query,where,orderBy,limit,onSnapshot}=fs;
+      // Listen to the last 20 messages across all rp_rooms sub-collections
+      const msgsRef=collectionGroup(db,'messages');
+      const since=new Date(Date.now()-5000).toISOString(); // only messages from now on
+      const q=query(msgsRef,where('created_at','>',since),orderBy('created_at','asc'),limit(50));
+      let first=true;
+      this._unsubGlobal=onSnapshot(q,snap=>{
+        if(first){first=false;return;} // skip initial snapshot
+        snap.docChanges().forEach(change=>{
+          if(change.type!=='added')return;
+          const data={...change.doc.data(),id:change.doc.id,created_at:_fbTs(change.doc.data().created_at)};
+          const roomId=data.room_id;
+          if(!roomId||roomId==S.roomId)return; // skip active room (handled by connect())
+          if(data.sent_by_user===S.user?.id)return; // skip own messages
+          if(data.is_deleted)return;
+          // Increment unread count for this room
+          if(!S.unread)S.unread={};
+          S.unread[roomId]=(S.unread[roomId]||0)+1;
+          UI.renderRooms();
+        });
+      },err=>console.warn('[RT] global onSnapshot error:',err));
+    }catch(e){console.warn('[RT] connectGlobal error:',e);}
+  },
+
   // Called from PM.open() to watch DM messages in realtime
   async watchDM(convId){
     if(this._unsubDM){try{this._unsubDM();}catch(e){} this._unsubDM=null;}
@@ -1967,11 +2028,19 @@ const RT={
     if(notify&&rec.sent_by_user&&rec.sent_by_user!==S.user?.id){
       const room=S.rooms.find(r=>r.id==S.roomId);
       const sender=USERS?.find(u=>u.id===rec.sent_by_user);
+      // @mention detection for extra notification
+      const myName=S.user?.name||'';
+      const isMention=myName&&rec.content&&(rec.content.includes('@'+myName)||rec.content.includes('@everyone'));
       Notif.show({
         title:`${sender?.name||rec.char_name} — #${room?.name||'chat'}`,
         body: rec.content?.slice(0,80)||'',
-        type:'message',
+        type: isMention?'mention':'message',
       });
+    }
+    // Unread badge: only when this room is currently NOT active (shouldn't happen for RT, but safety)
+    if(rec.sent_by_user&&rec.sent_by_user!==S.user?.id){
+      // Always update the badge since rec.room_id == S.roomId here, room IS active
+      // Badge is cleared on switchRoom
     }
   },
 
@@ -2056,13 +2125,10 @@ const Notif={
   },
 
   show({title,body,type='message',onClick=null}){
-    // Don't notify if page is focused
-    if(document.hasFocus()&&type==='message')return;
-
-    // Play sound
+    // Play sound for all notifications except when user sent it
     this._playSound(type);
 
-    // Browser/desktop notification
+    // Browser/desktop push notification when page is not focused
     if(this._permitted&&'Notification' in window&&document.hidden){
       try{
         const n=new Notification(title,{
@@ -2076,11 +2142,12 @@ const Notif={
       }catch(e){}
     }
 
-    // In-app toast for non-PM when focused
-    if(document.hasFocus()&&type==='pm'){
+    // In-app toast for PM or mentions when focused
+    if(document.hasFocus()&&(type==='pm'||type==='mention')){
       const t=document.createElement('div');
       t.className='notif-toast';
-      t.innerHTML=`<div style="font-weight:600;color:var(--pu);margin-bottom:2px">${title}</div><div style="font-size:12px;color:var(--t1)">${body}</div>`;
+      const iconHtml=type==='mention'?'<span style="font-size:13px;margin-right:6px">📌</span>':'';
+      t.innerHTML=`<div style="font-weight:600;color:${type==='pm'?'var(--pu)':'var(--am)'};margin-bottom:2px">${iconHtml}${title}</div><div style="font-size:12px;color:var(--t1)">${body.replace(/</g,'&lt;')}</div>`;
       t.onclick=()=>{ t.remove(); if(onClick)onClick(); };
       document.getElementById('toast-con').appendChild(t);
       setTimeout(()=>t.remove(),5000);
@@ -2125,9 +2192,12 @@ const UI={
     const rtype=room.room_type||( room.is_live?'live': room.is_ooc?'ooc': room.is_announcement?'announcement': room.is_private?'private':'ic');
     const rtIcon=isArchived?'🗄':{live:'●',ic:'🎭',ooc:'💬',private:'🔒',announcement:'📢'}[rtype]||'#';
     const rtColor=rtype==='live'?'color:var(--rd)':'';
+    const unreadCnt=S.unread&&S.unread[room.id]?S.unread[room.id]:0;
+    const unreadBadge=unreadCnt>0?`<span class="room-unread-badge">${unreadCnt>99?'99+':unreadCnt}</span>`:'';
     el.innerHTML=`<span class="room-type-badge" style="${rtColor}">${rtIcon}</span>
       <span class="room-name" style="${isArchived?'color:var(--t3)':''}">${room.name}</span>
       ${rtype==='live'?'<span class="room-live">LIVE</span>':''}
+      ${unreadBadge}
       <span class="room-drag-handle" title="Sürükle & Bırak" draggable="false">⠿</span>`;
     el.onclick=(ev)=>{
       if(ev.target.closest('.room-drag-handle'))return;
@@ -2191,6 +2261,24 @@ const UI={
     msgs.forEach((m,i)=>{const prev=msgs[i-1];const ns=!prev||prev.char_id!==m.char_id;UI.append(m,false,ns,favs.includes(String(m.id)));});
     setTimeout(()=>UI.scrollBot(),50);
   },
+  /* ── Media embed: YouTube & Spotify ──────────────────── */
+  _mediaEmbed(content){
+    if(!content) return '';
+    // YouTube patterns: watch?v=, youtu.be/, shorts/
+    const ytMatch=content.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+    if(ytMatch){
+      const vid=ytMatch[1];
+      return `<iframe class="media-embed" width="100%" height="152" src="https://www.youtube.com/embed/${vid}" frameborder="0" allowfullscreen style="border-radius:8px;margin-top:6px;display:block"></iframe>`;
+    }
+    // Spotify patterns: track/, playlist/, album/
+    const spMatch=content.match(/open\.spotify\.com\/(track|playlist|album)\/([A-Za-z0-9]+)/);
+    if(spMatch){
+      const type=spMatch[1], id=spMatch[2];
+      return `<iframe class="media-embed" src="https://open.spotify.com/embed/${type}/${id}" width="100%" height="152" frameborder="0" allowtransparency="true" allow="encrypted-media" style="border-radius:8px;margin-top:6px;display:block"></iframe>`;
+    }
+    return '';
+  },
+
   _rc(raw){
     if(!raw)return'';
     let t=raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -2377,7 +2465,8 @@ const UI={
           <span class="msg-ts">${rpTimeHtml}${time}${msg.is_edited?'<span class="msg-edited"> (düz)</span>':''}</span>
         </div>`:''}
         ${replyHtml}
-        <div class="msg-text">${UI._rc(msg.content)}</div>
+        <div class="msg-text">${msg.is_nsfw?'<span class="msg-nsfw-badge">🔞 NSFW</span>':''}${UI._rc(msg.content)}</div>
+        ${UI._mediaEmbed(msg.content||'')}
         <div class="msg-edit-wrap"><textarea class="edt-ta" rows="2"></textarea><div class="edt-rpt"><label><i class="fas fa-clock"></i> RP</label><input class="edt-rpt-inp" type="text" placeholder="${msg.rp_time||'YYYY-MM-DD HH:MM TZ'}" value="${msg.rp_time||''}"></div><div class="edt-btns"><button class="edt-save" onclick="UI.saveEdit('${msg.id}',this)">Kaydet</button><button class="edt-cancel" onclick="UI.cancelEdit('${msg.id}')">İptal</button></div></div>
         ${msg.attachment_url?`<div class="msg-attach"><img src="${msg.attachment_url}" onerror="this.parentNode.remove()" loading="lazy"></div>`:''}
         <div class="msg-reactions" data-msg-id="${msg.id}"></div>
@@ -3332,10 +3421,12 @@ const OAI={
       });
       const charLines=involvedChars.map(c=>{const o=S.oi.get((c.organizations||[])[0]||c.organization);return `• ${c.name} [${c.id}]${c.alias?` aka "${c.alias}"`:''}${o?` — ${o.name}`:''}${c.status&&c.status!=='Active'?` [${c.status}]`:''}`;}).join('\n');
       const orgLines=involvedOrgs.map(o=>`• ${o.name} [${o.id}]${o.type?` (${o.type})`:''}${o.status?` [${o.status}]`:''}`).join('\n');
+      // NSFW mesajlar AI'a gönderilmez
       const tr=messages.map(m=>{
         const t=new Date(m.created_at).toISOString().slice(11,16);
         const rpT=m.rp_time?` {${m.rp_time}}`:'';
-        return `[${t}${rpT}] ${m.char_name}${m.char_alias?` "${m.char_alias}"`:''}${m.org_name?` [${m.org_name}]`:''}: ${m.content}`;
+        const body=m.is_nsfw?'[Hassas içerik — gizli]':(m.content||'');
+        return `[${t}${rpT}] ${m.char_name}${m.char_alias?` "${m.char_alias}"`:''}${m.org_name?` [${m.org_name}]`:''}: ${body}`;
       }).join('\n');
       const worldCtx=this._worldSnapshot?`\nWORLD CONTEXT (NYC_DB — read only, for reference):\n${this._worldSnapshot}\n`:'';
       const prompt=`You are NYC_DB Observer AI. Observe only. Return ONLY valid JSON.${worldCtx}\nMESSAGE FORMAT NOTE: *text* = IC emote/action (purple italic), (( text )) = OOC comment (ignore for IC analysis), **text** = bold, _text_ = italic, ~~text~~ = strikethrough, [color|text] = colored text, @name = player mention. Strip formatting marks when extracting character dialogue/actions for summaries.\nINVOLVED CHARACTERS:\n${charLines||'(unknown)'}\nINVOLVED ORGANIZATIONS:\n${orgLines||'(none)'}\nTRANSCRIPT (${messages.length} messages):\n${tr}\nRespond:{"session_summary":{"title":"","summary":"","involved_chars":[],"involved_orgs":[],"significance":"low"},"incidents":[{"title":"","incident_type":"confrontation","severity":"low","description":"","location_name":"","involved_chars":[],"involved_orgs":[],"source_confidence":0.0}],"character_memories":[{"char_id":"","char_name":"","memory_type":"event","title":"","content":"","emotional_tag":"neutral","importance":50,"about_chars":[]}],"relationship_changes":[{"entity_a_id":"","entity_a_name":"","entity_a_type":"character","entity_b_id":"","entity_b_name":"","entity_b_type":"character","change_type":"neutral","direction":"mutual","trust_delta":0,"description":""}],"flags":{"requires_admin_review":false,"review_reason":""}}`;
@@ -4364,6 +4455,8 @@ Login._start=async function(u){
   await PlayerProfile.loadAll();
   // Init notifications
   Notif.init();
+  // Start global multi-room listener for unread badges
+  RT.connectGlobal();
   // Inject DM pill after RP view renders
   setTimeout(()=>window.injectDMPill?.(), 200);
   setTimeout(()=>window.injectDMPill?.(), 800);
@@ -4920,6 +5013,15 @@ const MasterAgent = {
       '  @KarakterAdı          → oyuncu/karakter etiket (bildirim gönderir)',
       'ÖRNEK: SEND_MSG:{"content":"*Yavaşça öne çıkar ve ellerini havaya kaldırır.* Kaçmıyorum, sakin ol.","char_name":"Marcus Webb"}',
       '',
+      '== NSFW / HASSAS İÇERİK ==',
+      'NSFW/hassas içerikli mesajlar [Hassas içerik — gizli] olarak işaretlenir ve sen bu içerikleri göremezsin.',
+      'Bu tür içerikleri analiz etme, tekrar etme veya türetme.',
+      '',
+      '== MÜZİK EKLEMEk ==',
+      'Kullanıcı "müzik ekle", "şarkı çal", "sahneye müzik koy" veya "set the mood" dediğinde:',
+      'SEND_MSG ile mesaj içine bir YouTube veya Spotify URL ekleyebilirsin.',
+      'Örnek: SEND_MSG:{"content":"Sahneye uygun bir müzik: https://www.youtube.com/watch?v=VIDEO_ID","char_name":"DJ NPC"}',
+      '',
       '== ETİKET SİSTEMİ ==',
       'RP mesajlarında [Karakter:İsim], [Araç:İsim], [Org:İsim], [Mülk:İsim] etiketleri kullanılır.',
       'Bu etiketler oyuncular tarafından ve senin mesajlarında sahne zenginleştirmek için kullanılır.',
@@ -4964,12 +5066,12 @@ const MasterAgent = {
 
     if (!msgs.length) return header + '\n\n== SON MESAJLAR: (bu odada henüz mesaj yok) ==';
 
+    // NSFW mesajlar AI'a gönderilmez
     const lines = msgs.map(m => {
       const t = m.rp_time ? m.rp_time.slice(11,16) : (m.created_at||'').slice(11,16) || '??:??';
       const who = `${m.char_name||'?'}${m.char_alias?' ('+m.char_alias+')':''}`;
-      const body = (m.content||'').length > clipPer
-        ? (m.content||'').slice(0, clipPer) + '…'
-        : (m.content||'');
+      const raw = m.is_nsfw ? '[Hassas içerik — gizli]' : (m.content||'');
+      const body = raw.length > clipPer ? raw.slice(0, clipPer) + '…' : raw;
       return `[${t}] ${who}: ${body}`;
     });
 
