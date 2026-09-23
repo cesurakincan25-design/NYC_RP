@@ -6338,16 +6338,36 @@ const MasterAgent = {
     const charName = sentMsg.char_name || '?';
     const content  = sentMsg.content  || '';
 
-    // Build a concise auto-prompt — don't inject full liveCtx (billing efficient)
+    // Son MA mesajından bu yana son 6 mesajı al — context için
+    const roomMsgs = (S?.msgs?.[S?.roomId] || []);
+    const recentMsgs = roomMsgs.slice(-8);
+    // MA'nın bu sahnede oynadığı son karakteri bul
+    const lastMAMsg = [...roomMsgs].reverse().find(m => (m.char_name||'').toLowerCase().includes('master agent'));
+    const maCurrentChar = lastMAMsg ? (lastMAMsg.char_alias || lastMAMsg.char_name || 'bilinmiyor') : 'bilinmiyor';
+    const maCharOrg = lastMAMsg?.org_name ? ` (${lastMAMsg.org_name})` : '';
+
+    // Son mesajları formatla
+    const ctxLines = recentMsgs.map(m => {
+      const who = m.char_alias || m.char_name || '?';
+      const isMA = (m.char_name||'').toLowerCase().includes('master agent');
+      const prefix = isMA ? `[MA → ${who}]` : `[${who}]`;
+      return `${prefix}: ${(m.content||'').slice(0, 150)}`;
+    }).join('\n');
+
+    // Build context-aware auto-prompt
     const autoPrompt = [
-      `[OTO-DEVAM] ${charName} şunu söyledi/yaptı: "${content.slice(0,200)}"`,
+      `[OTO-DEVAM] Şu an ${maCurrentChar}${maCharOrg} karakterini oynuyorsun.`,
       '',
-      'Sahneyi oyuncu olarak devam ettir:',
-      '- Mevcut NPC\'leri veya çevredeki karakterleri kullanarak doğal bir tepki yaz.',
-      '- Yeni NPC gerekiyorsa kısa bir tasvir ekle.',
+      'Son mesajlar (sahne bağlamı):',
+      ctxLines,
+      '',
+      `Şimdi ${charName} şunu yaptı/söyledi: "${content.slice(0,200)}"`,
+      '',
+      'Kurallar:',
+      `- ${maCurrentChar} olarak sahneyi devam ettir — başka karakter oynama, karakterini değiştirme.`,
       '- Mesajını SEND_MSG komutuyla doğrudan odaya gönder.',
-      '- Tek bir aksiyon/tepki yeterli — sahneyi uzatma.',
-      '- Eğer sahne zaten tamamsa veya tepki gerekmiyorsa sadece "Bekliyorum." yaz.',
+      '- Tek bir doğal tepki yeterli — sahneyi fazla uzatma.',
+      '- Eğer sahne tamamsa veya tepki gerekmiyorsa sadece "Bekliyorum." yaz.',
     ].join('\n');
 
     try {
