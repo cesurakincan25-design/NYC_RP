@@ -356,6 +356,13 @@ const DMPanel = {
     btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Okunuyor…';
     try {
       await window.DMEngine.readNow(S.roomId);
+      // MA hook — inject DM read completion as passive context (no Gemini call)
+      if (window.MasterAgent) {
+        const ctx = window.DMEngine.getContext?.();
+        const summary = ctx ? ctx.toString().slice(0, 400) : '(bağlam alınamadı)';
+        MasterAgent._history.push({role:'user', parts:[{text:'[DM OKUMA TAMAMLANDI]\n'+summary}]});
+        MasterAgent._history.push({role:'model', parts:[{text:'[DM bağlamı alındı, hazırım.]'}]});
+      }
     } catch(e) {
       toast('Okuma hatası: ' + e.message, 'error');
     } finally {
