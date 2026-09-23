@@ -5486,8 +5486,8 @@ window.DM_CONFIG = {
    MA PANEL — override/extend dm_panel.js DMPanel with
    close/open for the full-screen MA view, plus modal stubs.
 ════════════════════════════════════════════════════════ */
-// dm_panel.js may have already declared DMPanel — extend it
-if (typeof DMPanel === 'undefined') window.DMPanel = {};
+// dm_panel.js may have already declared DMPanel — extend it safely
+if (typeof window.DMPanel !== 'object' || !window.DMPanel) window.DMPanel = {};
 Object.assign(window.DMPanel, {
   /* ── Close MA panel → back to RP ── */
   close() {
