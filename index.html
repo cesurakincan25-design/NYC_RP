@@ -3540,8 +3540,10 @@ const EntityBar = {
 window.EntityBar = EntityBar;
 
 /* ═══ EVENT WIRING ═══════════════════════════════════════ */
-document.addEventListener('DOMContentLoaded',()=>{
+function _wireInput(){
   const inp=document.getElementById('msg-input');
+  if(!inp||inp._wired)return;
+  inp._wired=true;
 
   // Paste: catch image paste, suggest URL mode
   inp.addEventListener('paste',e=>{
@@ -3595,6 +3597,12 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('char-sel-btn')?.addEventListener('click',()=>RP.openPicker());
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.mbd').forEach(el=>el.classList.add('hidden'));if(typeof Autocomplete!=='undefined')Autocomplete.hide();}});
   Login.init();
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  _wireInput();
+  // Fallback: login sonrası input görünür olunca yeniden dene
+  const obs=new MutationObserver(()=>{const i=document.getElementById('msg-input');if(i&&!i._wired)_wireInput();});
+  obs.observe(document.body,{childList:true,subtree:true});
 });
 
 /* ═══ PLAYER PROFILE SYSTEM ══════════════════════════════ */
