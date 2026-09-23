@@ -475,7 +475,7 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
       <div id="rp-time-override-bar" style="display:none;align-items:center;gap:6px;padding:4px 10px 0;border-top:1px solid rgba(155,111,212,.15)">
         <i class="fas fa-clock" style="font-size:10px;color:var(--pu);opacity:.7"></i>
         <span style="font-family:var(--mono);font-size:9px;color:var(--pu);opacity:.7;text-transform:uppercase;letter-spacing:.08em">RP Zamanı Override</span>
-        <input id="rp-time-override-inp" type="text" placeholder="YYYY-MM-DD HH:MM TZ  (boş = otomatik)" style="flex:1;background:transparent;border:none;outline:none;color:var(--pu);font-family:var(--mono);font-size:11px">
+        <input id="rp-time-override-inp" type="text" placeholder="22:30 · +1h · +30m · -2h · +1d · 2025-03-15 22:30 EST" style="flex:1;background:transparent;border:none;outline:none;color:var(--pu);font-family:var(--mono);font-size:11px">
         <button onclick="document.getElementById('rp-time-override-bar').style.display='none';document.getElementById('rp-time-override-inp').value=''" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:11px;padding:0 2px">✕</button>
       </div>
       <div id="input-toolbar">
@@ -1111,7 +1111,7 @@ const RP={
     const overrideInp=document.getElementById('rp-time-override-inp');
     const overrideVal=overrideInp?.value.trim()||'';
     // Get RP time before clearing input (async but fire early)
-    const rpTimePromise=overrideVal?Promise.resolve(overrideVal):RpTime.onMessage(S.roomId,txt);
+    const rpTimePromise=overrideVal?RpTime._parseAndApply(S.roomId,overrideVal):RpTime.onMessage(S.roomId,txt);
     // Reset override bar
     if(overrideVal&&overrideInp){overrideInp.value='';document.getElementById('rp-time-override-bar').style.display='none';}
     const pl={
@@ -2143,8 +2143,15 @@ const UI={
     const el=document.querySelector(`[data-msg-id="${id}"]`);if(!el)return;
     const ta=el.querySelector('.edt-ta');if(!ta)return;
     const rptInp=el.querySelector('.edt-rpt-inp');
-    const newRpTime=rptInp?rptInp.value.trim()||null:undefined;
-    // Failsafe: RP time formatını doğrula (kabul: "YYYY-MM-DD HH:MM TZ" veya boş)
+    const rawRptVal=rptInp?rptInp.value.trim()||null:undefined;
+    // Parse flexible time input (time-only, relative offset, full string, etc.)
+    // For edits we parse but do NOT advance room state
+    let newRpTime=rawRptVal;
+    if(rawRptVal){
+      const currentSt=RpTime._state[S.roomId]||RpTime._DEFAULT;
+      const parsed=RpTime._parseInput(rawRptVal,currentSt);
+      newRpTime=parsed?parsed.rp_time_string:rawRptVal;
+    }
     if(newRpTime){
       const orig=(S.msgs[S.roomId]||[]).find(x=>x.id==id)?.rp_time||null;
       if(orig&&newRpTime!==orig){
@@ -2318,6 +2325,95 @@ const RpTime={
     document.getElementById('rtm-scale').value=st.time_scale||1;
     OM('m-rp-time');
   },
+  // Parse flexible time input and return {rp_time_string, newSt} or null if unrecognised
+  // Patterns handled:
+  //   "22:30"           → keep date, set hour/min
+  //   "22:30 EST"       → keep date, set hour/min + tz
+  //   "+1h" "+90m"      → relative minute/hour offset from currentSt
+  //   "-30m" "-2h"      → negative offset
+  //   "+1d" "-1d"       → day offset only
+  //   "+1d 22:30"       → day offset AND set time
+  //   "+1d 22:30 EST"   → day offset, set time + tz
+  //   "2025-03-15 22:30 EST" → full override (existing format)
+  // Returns null if nothing matched (caller should use raw string as-is)
+  _parseInput(rawStr, currentSt){
+    const s=rawStr.trim();
+    const st={...currentSt};
+
+    // Helper: apply minute offset with day rollover (reuses _advance calendar logic)
+    const applyMins=(base,mins)=>{
+      let total=base.rp_hour*60+base.rp_minute+mins;
+      let dayDelta=0;
+      // Handle negative wrap: go back to previous day(s)
+      while(total<0){total+=1440;dayDelta--;}
+      dayDelta+=Math.floor(total/1440);total%=1440;
+      const out={...base,rp_hour:Math.floor(total/60),rp_minute:total%60};
+      if(dayDelta!==0){
+        let day=base.rp_day+dayDelta,month=base.rp_month,year=base.rp_year;
+        const daysInMonth=[0,31,28,31,30,31,30,31,31,30,31,30,31];
+        const leap=m=>daysInMonth[m]+(m===2&&((year%4===0&&year%100!==0)||year%400===0)?1:0);
+        while(day>leap(month)){day-=leap(month);month++;if(month>12){month=1;year++;}}
+        while(day<1){month--;if(month<1){month=12;year--;}day+=leap(month);}
+        out.rp_day=day;out.rp_month=month;out.rp_year=year;
+      }
+      return out;
+    };
+
+    // Helper: apply day offset
+    const applyDays=(base,d)=>applyMins(base,d*1440);
+
+    // 1. Full format: "YYYY-MM-DD HH:MM TZ"
+    const fullRe=/^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})(?:\s+([A-Z]{2,5}))?$/;
+    let m=s.match(fullRe);
+    if(m){
+      const newSt={...st,rp_year:+m[1],rp_month:+m[2],rp_day:+m[3],rp_hour:+m[4],rp_minute:+m[5]};
+      if(m[6])newSt.tz=m[6];
+      return{rp_time_string:this.fmt(newSt),newSt};
+    }
+
+    // 2. Relative: optional day part, optional time part
+    //    e.g. "+1d", "-1d", "+1d 22:30", "+1d 22:30 EST", "+2h", "-30m", "+90m"
+    const relRe=/^([+-]\d+)([dhm])(?:\s+(\d{1,2}):(\d{2})(?:\s+([A-Z]{2,5}))?)?$/;
+    m=s.match(relRe);
+    if(m){
+      const n=parseInt(m[1]),unit=m[2];
+      let newSt=st;
+      if(unit==='d')newSt=applyDays(st,n);
+      else if(unit==='h')newSt=applyMins(st,n*60);
+      else if(unit==='m')newSt=applyMins(st,n);
+      if(m[3]!==undefined){newSt={...newSt,rp_hour:+m[3],rp_minute:+m[4]};}
+      if(m[5])newSt.tz=m[5];
+      return{rp_time_string:this.fmt(newSt),newSt};
+    }
+
+    // 3. Time-only: "22:30" or "22:30 EST"
+    const timeRe=/^(\d{1,2}):(\d{2})(?:\s+([A-Z]{2,5}))?$/;
+    m=s.match(timeRe);
+    if(m){
+      const newSt={...st,rp_hour:+m[1],rp_minute:+m[2]};
+      if(m[3])newSt.tz=m[3];
+      return{rp_time_string:this.fmt(newSt),newSt};
+    }
+
+    // No pattern matched
+    return null;
+  },
+
+  // Parse input, advance room state in memory + Firebase, update UI, return rp_time string
+  async _parseAndApply(roomId,rawStr){
+    const st=await this.load(roomId);
+    const parsed=this._parseInput(rawStr,st);
+    if(!parsed){
+      // Unrecognised — use raw string as-is (backward compat), don't touch state
+      return rawStr;
+    }
+    const{rp_time_string,newSt}=parsed;
+    this._state[roomId]=newSt;
+    this._save(roomId,newSt); // fire-and-forget
+    this._updateUI(roomId,newSt);
+    return rp_time_string;
+  },
+
   async saveModal(){
     const roomId=S.roomId;if(!roomId)return;
     const st=this._state[roomId]||this._DEFAULT;
