@@ -216,6 +216,10 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 .rr-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 /* fav */
 .msg-group.fav .msg-ts::after{content:' ★';color:var(--gd)}
+/* Master Agent mesajları — özel görsel işaret */
+.msg-group.ma-msg{border-left:2px solid rgba(155,111,212,.55);margin-left:-2px;padding-left:2px;background:rgba(155,111,212,.035)}
+.msg-group.ma-msg .msg-char-tag{color:#b28fe8!important}
+.ma-badge{display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:rgba(155,111,212,.18);border:1px solid rgba(155,111,212,.35);color:var(--pu);padding:0 5px;border-radius:3px;margin-left:4px;vertical-align:middle}
 /* reactions */
 .msg-reactions{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
 .rpill{display:flex;align-items:center;gap:3px;background:var(--bg3);border:1px solid var(--ln);border-radius:12px;padding:2px 7px;font-size:12px;cursor:pointer;user-select:none;transition:background var(--tr),border-color var(--tr)}
@@ -637,7 +641,10 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
     <!-- Collapsible header -->
     <div id="ma-sb-head" onclick="MASidebar.toggle()">
       <span class="ma-sb-title"><i class="fas fa-robot"></i> Master Agent</span>
-      <i class="fas fa-chevron-up" id="ma-sb-toggle-icon"></i>
+      <div style="display:flex;align-items:center;gap:4px" onclick="event.stopPropagation()">
+        <button title="MA Panel'i Tam Ekran Aç" onclick="DMPanel.open()" style="background:none;border:none;color:var(--pu);cursor:pointer;font-size:11px;padding:2px 5px;border-radius:3px;opacity:.7;transition:opacity .15s" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.7"><i class="fas fa-expand-alt"></i></button>
+        <i class="fas fa-chevron-up" id="ma-sb-toggle-icon"></i>
+      </div>
     </div>
     <div id="ma-sb-body">
       <!-- Chat log -->
@@ -864,7 +871,7 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 <script>
 'use strict';
 /* ═══ CONSTANTS ═════════════════════════════════════════ */
-const GEM_MDL = () => window.DM_CONFIG?.geminiModel || 'gemini-3.6-flash';
+const GEM_MDL = () => window._MA_MODEL || window.DM_CONFIG?.geminiModel || 'gemini-2.5-flash';
 
 // Shared Gemini REST helper — Observer AI + DM Engine her ikisi de bunu kullanır
 async function _geminiGenerate(prompt, opts={}) {
@@ -912,6 +919,8 @@ const USERS=[
   {id:'tuna', name:'Tuna', role:'Admin',color:'#4db880'},
   {id:'nes',  name:'Nes',  role:'Admin',color:'#e8a74a'},
   {id:'aley', name:'Aley', role:'Admin',color:'#e05555'},
+  /* Master Agent — yapay zeka oyuncusu */
+  {id:'master_agent',name:'Master Agent',role:'AI',color:'#9b6fd4',isMA:true},
 ];
 /* ═══ HELPERS ═══════════════════════════════════════════ */
 function OM(id){document.getElementById(id)?.classList.remove('hidden');}
@@ -1357,6 +1366,8 @@ const Login={
     RP.init();
     // 6 saatlik otomatik backup başlat
     setTimeout(() => AutoBackup.start(), 3000);
+    // MA konuşma geçmişini Firebase'den yükle
+    setTimeout(() => { if(window.MasterAgent) MasterAgent.loadHistory(); }, 4000);
   },
   _togglePw(inputId,btn){
     const inp=document.getElementById(inputId);if(!inp)return;
@@ -2737,7 +2748,8 @@ const UI={
       msg.content.includes('@everyone')||msg.content.includes('@here')
     );
     const el=document.createElement('div');
-    el.className='msg-group'+(ns?' new-sender':'')+(isFav?' fav':'')+(isMentioned?' mentioned':'');
+    const isMAMsg=!!(window.MasterAgent&&MasterAgent._sentIds?.has(msg.id));
+    el.className='msg-group'+(ns?' new-sender':'')+(isFav?' fav':'')+(isMentioned?' mentioned':'')+(isMAMsg?' ma-msg':'');
     el.dataset.msgId=msg.id;
     el.dataset.charId=String(msg.char_id||'');
     el.dataset.userId=thisUser;
@@ -2758,6 +2770,7 @@ const UI={
               onclick="UI.charPreview('${msg.char_id}',event,'${(msg.char_name||'').replace(/'/g,"\\'")}')"
               oncontextmenu="event.preventDefault();UI.charContextMenu(event,'${msg.char_id}','${(msg.char_name||'').replace(/'/g,"\\'")}')">
               ${msg.char_name||''}${msg.char_alias?` <span class="msg-char-alias">"${msg.char_alias}"</span>`:''}
+              ${isMAMsg?'<span class="ma-badge"><i class="fas fa-robot"></i> MA</span>':''}
               ${msg.org_name?`<span class="msg-org" style="background:${msg.org_color||''}22;color:${msg.org_color||'var(--t2)'};border:1px solid ${msg.org_color||'transparent'}55">${msg.org_name}</span>`:''}
             </span>
           </span>
@@ -5209,46 +5222,39 @@ Login._start=async function(u){
 
 </style>
 
-<!-- DM Panel View (injected into app views) -->
+<!-- Master Agent Panel View -->
 <div class="view" id="view-dm" style="display:none">
   <div id="dm-header">
-    <span class="dm-brand">NYC<em>_</em>DM</span>
+    <span class="dm-brand" style="color:var(--pu)"><i class="fas fa-robot" style="margin-right:5px;font-size:11px"></i>NYC<em>_</em>MA</span>
     <div class="adm-sep"></div>
     <div class="adm-st">
-      <div class="sdot" id="dm-sdot"></div>
-      <span id="dm-stxt" style="color:var(--t2)">Offline</span>
+      <div class="sdot" id="dm-sdot" style="background:var(--pu)"></div>
+      <span id="dm-stxt" style="color:var(--pu)">Master Agent</span>
     </div>
     <div class="adm-sep"></div>
-    <span style="font-family:var(--mono);font-size:10px;color:var(--t3)" id="dm-ctx-count">Context: 0 entries</span>
+    <span style="font-family:var(--mono);font-size:10px;color:var(--t3)" id="dm-ctx-count" title="MA'nın gönderdiği mesaj sayısı">MA mesajları: 0</span>
     <div class="adm-spc"></div>
     <!-- Tab buttons -->
     <div class="dm-tabs">
-      <button class="dm-tab active" id="dm-tab-panel" onclick="DMPanel.switchTab('panel')">
-        <i class="fas fa-sliders-h"></i> Panel
-      </button>
-      <button class="dm-tab" id="dm-tab-ma" onclick="DMPanel.switchTab('ma')">
+      <button class="dm-tab active" id="dm-tab-ma" onclick="DMPanel.switchTab('ma')">
         <i class="fas fa-robot"></i> Master Agent
+      </button>
+      <button class="dm-tab" id="dm-tab-panel" onclick="DMPanel.switchTab('panel')">
+        <i class="fas fa-sliders-h"></i> DM Araçları
       </button>
     </div>
     <div class="adm-sep"></div>
+    <button class="adm-btn" style="border-color:rgba(155,111,212,.4);background:rgba(155,111,212,.1);color:var(--pu)" onclick="MAPanel.loadMAChars()">
+      <i class="fas fa-sync-alt"></i> MA Karakterler
+    </button>
     <button class="adm-btn" style="border-color:rgba(155,111,212,.4);background:rgba(155,111,212,.1);color:var(--pu)" id="dm-read-btn" onclick="DMPanel.readNow()">
-      <i class="fas fa-book-open"></i> Şimdi Oku
+      <i class="fas fa-book-open"></i> DM Oku
     </button>
-    <button class="adm-btn" id="dm-auto-btn" onclick="DMPanel.toggleAutoLoop()" style="color:var(--t2)">
-      <i class="fas fa-play-circle"></i> Otomatik: KAPALI
-    </button>
-    <select id="dm-auto-interval" onchange="DMPanel.setAutoInterval(this.value)"
-      style="background:var(--bg2);border:1px solid var(--ln);color:var(--t2);padding:4px 6px;border-radius:6px;font-size:11px;font-family:var(--mono)">
-      <option value="30">30 sn</option>
-      <option value="60" selected>60 sn</option>
-      <option value="120">2 dk</option>
-      <option value="300">5 dk</option>
-    </select>
     <button class="adm-btn" onclick="DMPanel.close()"><i class="fas fa-arrow-left"></i> RP'ye Dön</button>
   </div>
 
-  <!-- ── DM Panel tab ── -->
-  <div id="dm-grid" class="dm-tab-content">
+  <!-- ── DM Panel tab (araçlar) ── -->
+  <div id="dm-grid" class="dm-tab-content" style="display:none">
     <!-- LEFT: NPCs -->
     <div class="dm-col">
       <div class="dm-col-head">
@@ -5292,37 +5298,76 @@ Login._start=async function(u){
     </div>
   </div>
 
-  <!-- ── Master Agent tab ── -->
-  <div id="dm-ma" class="dm-tab-content" style="display:none;flex:1;flex-direction:column;overflow:hidden">
-    <!-- Chat history -->
-    <div id="ma-chat" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px">
-      <div class="ma-empty"><i class="fas fa-robot"></i><p>Master Agent hazır.<br><small>Herhangi bir RP sorusu sorun veya bir eylem isteyin.</small></p></div>
+  <!-- ── Master Agent tab (varsayılan) ── -->
+  <div id="dm-ma" class="dm-tab-content" style="flex:1;flex-direction:row;overflow:hidden">
+
+    <!-- LEFT: MA Characters panel -->
+    <div class="dm-col" style="width:260px;flex-shrink:0">
+      <div class="dm-col-head">
+        <span class="dm-col-title"><i class="fas fa-robot" style="margin-right:5px;color:var(--pu)"></i>MA Karakterleri</span>
+        <button onclick="MAPanel.loadMAChars()" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:11px" title="Yenile"><i class="fas fa-sync-alt"></i></button>
+      </div>
+      <!-- MA Settings -->
+      <div style="padding:8px 12px;border-bottom:1px solid var(--ln);background:var(--bg2)">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--t3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">MA Ayarları</div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t1);cursor:pointer">
+            <input type="checkbox" id="ma-auto-chk" onchange="MasterAgent._autoEnabled=this.checked;document.getElementById('ma-auto-toggle').textContent='🤖 Oto: '+(this.checked?'AÇ':'KPL')" checked>
+            Otomatik Tepki
+          </label>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:10px;color:var(--t2);font-family:var(--mono)">Model:</span>
+            <select id="ma-model-sel" onchange="window._MA_MODEL=this.value"
+              style="flex:1;background:var(--bg3);border:1px solid var(--ln);color:var(--t1);font-family:var(--mono);font-size:10px;padding:2px 4px;border-radius:4px">
+              <option value="gemini-2.5-pro" selected>2.5 Pro</option>
+              <option value="gemini-2.5-flash">2.5 Flash</option>
+              <option value="gemini-2.0-flash">2.0 Flash</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:4px">
+            <button class="adm-btn" style="font-size:9px;flex:1;color:var(--rd)" onclick="MasterAgent.clear()"><i class="fas fa-trash"></i> Sohbeti Sil</button>
+            <button class="adm-btn" style="font-size:9px;flex:1;color:var(--gn)" onclick="MasterAgent.loadHistory()"><i class="fas fa-download"></i> Tarihi Yükle</button>
+          </div>
+        </div>
+      </div>
+      <!-- MA char list -->
+      <div class="dm-body" id="ma-char-list">
+        <div class="empty" style="font-size:11px;padding:20px"><i class="fas fa-robot" style="color:rgba(155,111,212,.3)"></i><p style="color:var(--t3)">MA henüz karakter oynamadı.</p></div>
+      </div>
     </div>
 
-    <!-- Thinking indicator -->
-    <div id="ma-thinking" style="display:none;align-items:center;gap:8px;padding:8px 16px;border-top:1px solid var(--ln);color:var(--t3);font-size:11px;font-family:var(--mono)">
-      <i class="fas fa-spinner fa-spin" style="color:var(--pu)"></i> Master Agent düşünüyor…
-    </div>
+    <!-- RIGHT: Chat area -->
+    <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0">
+      <!-- Chat history -->
+      <div id="ma-chat" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div class="ma-empty"><i class="fas fa-robot"></i><p>Master Agent hazır.<br><small>Herhangi bir RP sorusu sorun veya bir eylem isteyin.</small></p></div>
+      </div>
 
-    <!-- Quick actions -->
-    <div style="display:flex;gap:6px;padding:8px 16px;border-top:1px solid var(--ln);background:var(--bg1);flex-wrap:wrap">
-      <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Mevcut RP durumunu özetle.')"><i class="fas fa-clipboard-list"></i> Durum Özeti</button>
-      <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Observer AI birikmiş mesajlarını hemen işle ve bana sonuçları söyle. FLUSH_OAI')"><i class="fas fa-bolt"></i> OAI Flush</button>
-      <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('DM bağlamını şimdi güncelle ve son gelişmeleri özetle. READ_DM')"><i class="fas fa-book-open"></i> DM Güncelle</button>
-      <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Mevcut RP atmosferine uygun küçük bir sokak olayı veya NPC hareketi yarat ve doğrudan sahneye yaz (SEND_MSG kullan).')"><i class="fas fa-globe"></i> Olay Öner</button>
-      <button class="adm-btn" style="font-size:10px;border-color:rgba(232,167,74,.4);color:var(--am)" onclick="(()=>{const rt=S.roomId?RpTime.get(S.roomId):'—';MasterAgent.send('Şu an RP zamanı: '+rt+'. Bir sahne veya olay zamanı ayarlamak istiyorum. Bana öneriler ver ve ne zaman ne yapabileceğimizi planla (mevcut RP saatini baz alarak).');})()"><i class="fas fa-clock"></i> Setup At</button>
-      <button class="adm-btn" style="font-size:10px;margin-left:auto;color:var(--rd)" onclick="MasterAgent.clear()"><i class="fas fa-trash"></i> Sohbeti Temizle</button>
-    </div>
+      <!-- Thinking indicator -->
+      <div id="ma-thinking" style="display:none;align-items:center;gap:8px;padding:8px 16px;border-top:1px solid var(--ln);color:var(--t3);font-size:11px;font-family:var(--mono)">
+        <i class="fas fa-spinner fa-spin" style="color:var(--pu)"></i> Master Agent düşünüyor…
+      </div>
 
-    <!-- Input -->
-    <div style="display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--ln);background:var(--bg0)">
-      <textarea id="ma-inp" rows="2" placeholder="Master Agent'a bir soru sor veya eylem isteyin… (Enter gönder, Shift+Enter satır atla)"
-        style="flex:1;background:var(--bg2);border:1px solid var(--ln);color:var(--t1);border-radius:8px;padding:8px 12px;font-family:var(--sans);font-size:12px;resize:none;line-height:1.5"
-        onkeydown="MasterAgent.onKey(event)"></textarea>
-      <button onclick="MasterAgent.submit()"
-        style="align-self:flex-end;background:linear-gradient(135deg,#7c4dff,#9b6fd4);border:none;color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;height:36px">
-        <i class="fas fa-paper-plane"></i>
-      </button>
+      <!-- Quick actions -->
+      <div style="display:flex;gap:6px;padding:8px 16px;border-top:1px solid var(--ln);background:var(--bg1);flex-wrap:wrap">
+        <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Mevcut RP durumunu özetle.')"><i class="fas fa-clipboard-list"></i> Durum</button>
+        <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Observer AI birikmiş mesajlarını hemen işle ve bana sonuçları söyle. FLUSH_OAI')"><i class="fas fa-bolt"></i> OAI Flush</button>
+        <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('DM bağlamını şimdi güncelle ve son gelişmeleri özetle. READ_DM')"><i class="fas fa-book-open"></i> DM Güncelle</button>
+        <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Mevcut RP atmosferine uygun küçük bir sokak olayı veya NPC hareketi yarat ve doğrudan sahneye yaz (SEND_MSG kullan).')"><i class="fas fa-globe"></i> Olay</button>
+        <button class="adm-btn" style="font-size:10px;border-color:rgba(232,167,74,.4);color:var(--am)" onclick="MASidebar.setupAct()"><i class="fas fa-city"></i> Setup At</button>
+        <button class="adm-btn" style="font-size:10px;border-color:rgba(155,111,212,.4);color:var(--pu)" onclick="MAPanel.loadMAChars()"><i class="fas fa-sync-alt"></i> Karakterleri Yenile</button>
+      </div>
+
+      <!-- Input -->
+      <div style="display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--ln);background:var(--bg0)">
+        <textarea id="ma-inp" rows="2" placeholder="Master Agent'a bir soru sor veya eylem isteyin… (Enter gönder, Shift+Enter satır atla)"
+          style="flex:1;background:var(--bg2);border:1px solid var(--ln);color:var(--t1);border-radius:8px;padding:8px 12px;font-family:var(--sans);font-size:12px;resize:none;line-height:1.5"
+          onkeydown="MasterAgent.onKey(event)"></textarea>
+        <button onclick="MasterAgent.submit()"
+          style="align-self:flex-end;background:linear-gradient(135deg,#7c4dff,#9b6fd4);border:none;color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;height:36px">
+          <i class="fas fa-paper-plane"></i>
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -5491,6 +5536,140 @@ window.DM_CONFIG = {
 
 <script>
 /* ════════════════════════════════════════════════════════
+   DM PANEL — UI controller for the #view-dm panel
+   (tab switching, close, NPC modal delegates, DM engine bridge)
+════════════════════════════════════════════════════════ */
+const DMPanel = {
+  /* ── Tab switch: 'ma' | 'panel' ── */
+  switchTab(tab) {
+    const maEl    = document.getElementById('dm-ma');
+    const gridEl  = document.getElementById('dm-grid');
+    const btnMA   = document.getElementById('dm-tab-ma');
+    const btnPanel= document.getElementById('dm-tab-panel');
+    if (!maEl || !gridEl) return;
+    if (tab === 'ma') {
+      maEl.style.display   = 'flex';
+      gridEl.style.display = 'none';
+      btnMA?.classList.add('active');
+      btnPanel?.classList.remove('active');
+      // Lazy-load MA char list on first open
+      if (window.MAPanel && !MAPanel._chars?.length) MAPanel.loadMAChars();
+    } else {
+      maEl.style.display   = 'none';
+      gridEl.style.display = 'grid';
+      btnMA?.classList.remove('active');
+      btnPanel?.classList.add('active');
+      // Populate NPC list when switching to DM tools
+      if (window.DMEngine?.getNPCs) this._populateNPCList();
+    }
+  },
+
+  /* ── Close DM panel → back to RP ── */
+  close() {
+    document.getElementById('view-dm').style.display  = 'none';
+    document.getElementById('view-rp').style.display  = 'flex';
+  },
+
+  /* ── Open DM panel ── */
+  open() {
+    document.getElementById('view-rp').style.display  = 'none';
+    document.getElementById('view-dm').style.display  = 'flex';
+    // ensure MA tab is visible by default
+    this.switchTab('ma');
+    if (window.MAPanel && !MAPanel._chars?.length) MAPanel.loadMAChars();
+  },
+
+  /* ── Read DM context (delegates to DMEngine if available) ── */
+  async readNow() {
+    if (window.DMEngine?.readNow) {
+      const btn = document.getElementById('dm-read-btn');
+      if (btn) { btn.disabled = true; }
+      try { await DMEngine.readNow(); toast('DM bağlamı güncellendi', 'success'); }
+      catch(e) { toast('DM okuma hatası: ' + e.message, 'error'); }
+      finally { if (btn) btn.disabled = false; }
+    } else {
+      toast('DM Engine aktif değil', 'warn');
+    }
+  },
+
+  /* ── NPC modal (quick-trigger for existing chars) ── */
+  openCreateNPC() {
+    OM('m-create-npc');
+  },
+
+  triggerNPC() {
+    const sel = document.getElementById('npc-trigger-select');
+    const charId = sel?.value;
+    if (!charId) { toast('Karakter seç', 'warn'); return; }
+    const char = S.ci?.get(charId);
+    if (!char) return;
+    MasterAgent.send(`"${char.name}" karakterini oyna. Sahneye uygun kısa bir mesaj yaz ve SEND_MSG ile gönder. char_id:"${charId}"`);
+    CM('m-npc-trigger');
+    DMPanel.switchTab('ma');
+  },
+
+  /* ── Generate Event / Dispatch ── */
+  openGenerateEvent() {
+    OM('m-gen-event');
+  },
+
+  async generateEvent() {
+    const txt = document.getElementById('gen-event-prompt')?.value?.trim();
+    if (!txt) { toast('Prompt yaz', 'warn'); return; }
+    CM('m-gen-event');
+    DMPanel.switchTab('ma');
+    await MasterAgent.send(`Dünya olayı yaz ve SEND_MSG ile gönder. Tema: ${txt}`);
+  },
+
+  openGenerateDispatch(prefix) {
+    OM('m-gen-dispatch');
+    if (prefix) {
+      const inp = document.getElementById('gen-dispatch-prompt');
+      if (inp) inp.value = prefix;
+    }
+  },
+
+  async generateDispatch() {
+    const txt = document.getElementById('gen-dispatch-prompt')?.value?.trim();
+    if (!txt) { toast('Dispatch içeriği yaz', 'warn'); return; }
+    CM('m-gen-dispatch');
+    DMPanel.switchTab('ma');
+    await MasterAgent.send(`Polis/acil servis dispatch mesajı yaz ve SEND_MSG ile gönder. İçerik: ${txt}`);
+  },
+
+  /* ── Context box ── */
+  clearContext() {
+    const el = document.getElementById('dm-context-list');
+    if (el) el.innerHTML = '<div class="empty" style="padding:20px;font-size:11px;color:var(--t3)">Context temizlendi.</div>';
+    if (window.DMEngine?.clearContext) DMEngine.clearContext();
+  },
+
+  /* ── NPC list (DM tools tab) ── */
+  _populateNPCList() {
+    const el = document.getElementById('dm-npc-list');
+    if (!el) return;
+    const chars = S.chars?.filter(c => c.tags?.includes('npc') || c.is_npc) || [];
+    if (!chars.length) { el.innerHTML = '<div class="empty" style="padding:20px;font-size:11px;color:var(--t3)">NPC bulunamadı.</div>'; return; }
+    el.innerHTML = chars.slice(0, 30).map(c => `
+      <div class="npc-item">
+        <div class="npc-ava">${c.image ? `<img src="${c.image}">` : (c.name||'?')[0].toUpperCase()}</div>
+        <div class="npc-inf">
+          <div class="npc-nm">${c.name||'?'}</div>
+          <div class="npc-sub">${c.occupation||c.role||'NPC'}</div>
+        </div>
+        <button class="npc-play-btn" onclick="DMPanel._playNPC('${c.id}','${(c.name||'').replace(/'/g,"\\'")}')">Oyna</button>
+      </div>`).join('');
+  },
+
+  _playNPC(charId, charName) {
+    MasterAgent.send(`"${charName}" (char_id:"${charId}") karakterini oyna. Sahneye uygun kısa bir mesaj gönder.`);
+    DMPanel.switchTab('ma');
+  },
+};
+
+window.DMPanel = DMPanel;
+
+/* ════════════════════════════════════════════════════════
    MASTER AGENT  — NYC_RP Orchestrator
    Single Gemini session with shared RP context.
    Fires ONLY when user sends a message in the MA chat tab.
@@ -5500,6 +5679,50 @@ const MasterAgent = {
   _history: [],          // {role:'user'|'model', parts:[{text}]}
   _busy: false,
   _SYSTEM: null,         // built once on first send
+  _FB_DOC: 'rp_config/ma_conversation_history', // Firestore path
+
+  /* ── Load history from Firebase ──────────────────────── */
+  async loadHistory() {
+    try {
+      const rows = await DB.get('ma_conversation_history?order=created_at.asc&limit=1');
+      if (!rows?.length) return;
+      const data = rows[0];
+      if (data?.history && Array.isArray(data.history)) {
+        this._history = data.history.slice(-60); // max 60 turns loaded
+        this._fbDocId = data.id || null;
+        this._renderHistory();
+        console.log(`[MA] ${this._history.length} turn tarihi Firebase'den yüklendi.`);
+      }
+    } catch(e) {
+      console.warn('[MA] Tarih yüklenemedi:', e.message);
+    }
+  },
+
+  /* ── Save history to Firebase (debounced) ────────────── */
+  _saveTimer: null,
+  _fbDocId: null,
+  _saveHistory() {
+    clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(async () => {
+      try {
+        // Keep last 80 turns to avoid bloat
+        const toSave = this._history.slice(-80);
+        const payload = {
+          history: toSave,
+          updated_at: new Date().toISOString(),
+          turn_count: toSave.length,
+        };
+        if (this._fbDocId) {
+          await DB.patch(`ma_conversation_history?id=eq.${this._fbDocId}`, payload);
+        } else {
+          const ref = await DB.post('ma_conversation_history', { ...payload, created_at: new Date().toISOString() });
+          this._fbDocId = ref?.id || null;
+        }
+      } catch(e) {
+        console.warn('[MA] Tarih kaydedilemedi:', e.message);
+      }
+    }, 2000); // debounce 2s
+  },
 
   /* ── Build system prompt (called once) ─────────────── */
   _buildSystem() {
@@ -5567,6 +5790,9 @@ const MasterAgent = {
       '  → Kullanıcı "bunu kaydet" veya "bu karakteri sakla" dediğinde kullan.',
       '  → Kaydettikten sonra bir sonraki SEND_MSG\'de char_id olarak yeni ID\'yi kullanabilirsin.',
       '  → org_id ve alias opsiyoneldir.',
+      '  ⚠️ ÖNEMLİ: SAVE_NPC KULLANMADAN ÖNCE "AKTİF KARİŞTERLER" listesinde aynı isimde',
+      '     bir karakter var mı kontrol et! Varsa SAVE_NPC KULLANMA — mevcut char_id\'yi kullan.',
+      '     Sistem de duplicate kontrolü yapar ve uyarı döndürür.',
       '',
       'SAVE_VEHICLE:{"plate":"34ABC123","model":"Dodge Charger","color":"Siyah","owner_name":"Marcus Webb","owner_id":"CHAR_ID","year":"2020","category":"Araba","mods":"Yükseltilmiş motor, koyu camlar","notes":"Gizli bölme var"}',
       '  → Yeni bir araç veritabanına (vehicles tablosu) kaydeder.',
@@ -5721,6 +5947,34 @@ const MasterAgent = {
         const p = JSON.parse(saveNpcMatch[1]);
         if (!p.name?.trim()) throw new Error('NPC adı boş');
 
+        // ── Duplicate check: önce DB'de bu isimde karakter var mı? ────
+        const nameNorm = p.name.trim().toLowerCase();
+        const existingInMem = (S.chars || []).find(c =>
+          c.name?.toLowerCase() === nameNorm ||
+          c.alias?.toLowerCase() === nameNorm
+        );
+        if (existingInMem) {
+          results.push(`⚠️ Karakter zaten mevcut → "${existingInMem.name}" (ID: ${existingInMem.id}) — yeni NPC oluşturulmadı. Mevcut karakteri kullanmak için char_id:"${existingInMem.id}" ile SEND_MSG at.`);
+          // Inject into MA's next context so it knows
+          if (!MasterAgent._sentIds) MasterAgent._sentIds = new Set();
+        } else {
+          // Also do a Firestore check for chars not yet in S.chars (e.g. recently created)
+          let existsInDB = null;
+          try {
+            const dbRows = await DB.get(`characters?name=eq.${encodeURIComponent(p.name.trim())}&limit=1`).catch(()=>[]);
+            if (dbRows?.length) existsInDB = dbRows[0];
+          } catch(_) {}
+
+          if (existsInDB) {
+            // Load into S.chars so future checks hit the in-memory cache
+            if (!S.chars) S.chars = [];
+            if (!S.chars.find(c=>c.id===existsInDB.id)) {
+              S.chars.push(existsInDB);
+              S.ci?.set(existsInDB.id, existsInDB);
+              S.cni?.set(existsInDB.name.toLowerCase(), existsInDB.id);
+            }
+            results.push(`⚠️ Veritabanında bu isimde karakter zaten var → "${existsInDB.name}" (ID: ${existsInDB.id}) — yeni NPC oluşturulmadı. Mevcut karakteri kullanmak için char_id:"${existsInDB.id}" ile SEND_MSG at.`);
+          } else {
         // Build a minimal character record
         const newChar = {
           name:        p.name.trim(),
@@ -5750,6 +6004,8 @@ const MasterAgent = {
         S.cni?.set(newChar.name.toLowerCase(), newId);
 
         results.push(`✅ NPC kaydedildi → "${newChar.name}" (ID: ${newId}) — artık SEND_MSG'de char_id olarak kullanılabilir.`);
+          } // end else (not in DB)
+          } // end else (not in mem)
       } catch(e) {
         results.push('❌ NPC kaydedilemedi: ' + e.message);
       }
@@ -5886,8 +6142,8 @@ const MasterAgent = {
           attachment_url: null,
           reactions:   {},
           is_edited:   false,
-          // NPCs are not owned by a real user — avoids wrong player attribution
-          sent_by_user: isRealChar ? (S.user?.id || null) : null,
+          // MA gerçek bir oyuncu gibi — tüm mesajlar master_agent'a atfedilir
+          sent_by_user: 'master_agent',
           rp_time:     rpTime || null,
         };
 
@@ -5903,6 +6159,8 @@ const MasterAgent = {
             MasterAgent._sentIds = new Set(arr.slice(arr.length - 25));
           }
         }
+        // MA Panel karakter listesini güncelle
+        if (window.MAPanel) MAPanel.notifyNewMsg(params.char_id||null, charName, params.char_alias||null, params.org_name||null);
         results.push(`✅ Mesaj gönderildi → [${charName}] "${params.content.slice(0, 60)}${params.content.length > 60 ? '…' : ''}"`);
       } catch(e) {
         results.push('❌ Mesaj gönderilemedi: ' + e.message);
@@ -5963,6 +6221,7 @@ const MasterAgent = {
       // Store raw reply in history (for multi-turn context), show augmented in UI
       const displayReply = toolResult ? reply + '\n\n---\n' + toolResult : reply;
       this._history.push({ role: 'model', parts: [{ text: displayReply }] });
+      this._saveHistory(); // persist to Firebase
       if (!silent) this._renderHistory();
       else {
         // Silent auto-react: show a subtle notification in sidebar
@@ -6015,12 +6274,19 @@ const MasterAgent = {
   },
 
   /* ── Clear history ───────────────────────────────────── */
-  clear() {
+  async clear() {
     this._history = [];
     this._SYSTEM = null;
     this._renderHistory();
-    document.getElementById('ma-chat').innerHTML =
+    const el = document.getElementById('ma-chat');
+    if (el) el.innerHTML =
       '<div class="ma-empty"><i class="fas fa-robot"></i><p>Master Agent hazır.<br><small>Herhangi bir RP sorusu sorun veya bir eylem isteyin.</small></p></div>';
+    // Also clear from Firebase
+    try {
+      if (this._fbDocId) {
+        await DB.patch(`ma_conversation_history?id=eq.${this._fbDocId}`, { history: [], turn_count: 0, updated_at: new Date().toISOString() });
+      }
+    } catch(e) { console.warn('[MA] Tarih temizlenemedi:', e.message); }
   },
 
   /* ── Handle Enter key in input ───────────────────────── */
@@ -6424,6 +6690,98 @@ const MASidebar = {
 };
 
 window.MASidebar = MASidebar;
+
+/* ═══ MA PANEL — MA'nın oynadığı karakterleri listeler ════════════════════ */
+const MAPanel = {
+  _chars: [], // { char_id, char_name, char_alias, org_name, msg_count, last_at }
+
+  async loadMAChars() {
+    const el = document.getElementById('ma-char-list');
+    if (el) el.innerHTML = '<div class="empty" style="font-size:11px;padding:20px;color:var(--t3)"><i class="fas fa-spinner fa-spin"></i> Yükleniyor…</div>';
+    try {
+      // MA'nın gönderdiği mesajlardan karakter listesi çıkar
+      const msgs = await DB.get('rp_messages?sent_by_user=eq.master_agent&is_deleted=eq.false&order=created_at.desc&limit=200').catch(() => []);
+      const charMap = new Map(); // char_id|char_name → aggregated
+      for (const m of msgs) {
+        const key = m.char_id || ('__'+m.char_name);
+        if (!key || key === '__' || key === '__null') continue;
+        if (!charMap.has(key)) {
+          charMap.set(key, {
+            char_id: m.char_id || null,
+            char_name: m.char_name || '?',
+            char_alias: m.char_alias || null,
+            org_name: m.org_name || null,
+            msg_count: 0,
+            last_at: m.created_at,
+          });
+        }
+        const entry = charMap.get(key);
+        entry.msg_count++;
+        if (m.created_at > entry.last_at) {
+          entry.last_at = m.created_at;
+          if (m.char_alias) entry.char_alias = m.char_alias;
+          if (m.org_name) entry.org_name = m.org_name;
+        }
+      }
+      this._chars = [...charMap.values()].sort((a,b) => (b.last_at||'').localeCompare(a.last_at||''));
+      this._render();
+    } catch(e) {
+      console.warn('[MAPanel]', e);
+      if (el) el.innerHTML = '<div class="empty" style="font-size:11px;padding:20px;color:var(--rd)">Yüklenemedi</div>';
+    }
+  },
+
+  _render() {
+    const el = document.getElementById('ma-char-list');
+    if (!el) return;
+    if (!this._chars.length) {
+      el.innerHTML = '<div class="empty" style="font-size:11px;padding:20px;text-align:center"><i class="fas fa-robot" style="color:rgba(155,111,212,.3);font-size:20px"></i><p style="color:var(--t3);margin-top:8px">MA henüz karakter oynamadı.</p></div>';
+      return;
+    }
+    el.innerHTML = this._chars.map(c => {
+      const initial = (c.char_name||'?')[0].toUpperCase();
+      const alias = c.char_alias ? `<span style="color:var(--t3);font-size:9px"> "${c.char_alias}"</span>` : '';
+      const org = c.org_name ? `<div style="font-size:9px;color:var(--t3);margin-top:1px"><i class="fas fa-building" style="font-size:8px"></i> ${c.org_name}</div>` : '';
+      const count = `<span style="font-size:9px;color:var(--t3);margin-left:auto">${c.msg_count} msg</span>`;
+      return `<div class="npc-card" style="padding:8px 10px;display:flex;align-items:flex-start;gap:8px;border-bottom:1px solid var(--ln);cursor:pointer"
+        onclick="MAPanel.playAs(${JSON.stringify(c.char_id||c.char_name)}, ${JSON.stringify(c.char_name)})">
+        <div style="width:28px;height:28px;border-radius:50%;background:rgba(155,111,212,.25);border:1px solid rgba(155,111,212,.4);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--pu);flex-shrink:0">${initial}</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:4px">
+            <span style="font-size:11px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.char_name}</span>${alias}${count}
+          </div>
+          ${org}
+        </div>
+      </div>`;
+    }).join('');
+  },
+
+  playAs(charIdOrName, charName) {
+    // MA'ya bu karakteri canlandırmasını söyle
+    const prompt = charIdOrName && charIdOrName !== charName
+      ? `Şimdi char_id:"${charIdOrName}" (${charName}) karakterini oyna. Mevcut RP ortamına uygun, kısa bir mesaj gönder.`
+      : `Şimdi "${charName}" karakterini oyna. Mevcut RP ortamına uygun, kısa bir mesaj gönder.`;
+    MasterAgent.send(prompt);
+  },
+
+  // SEND_MSG sonrası char listesini güncelle (yeni karakter eklenmişse)
+  notifyNewMsg(charId, charName, charAlias, orgName) {
+    const key = charId || ('__'+charName);
+    if (!key || key === '__') return;
+    const existing = this._chars.find(c => (c.char_id||('__'+c.char_name)) === key);
+    if (existing) {
+      existing.msg_count++;
+      existing.last_at = new Date().toISOString();
+      if (charAlias) existing.char_alias = charAlias;
+      if (orgName) existing.org_name = orgName;
+    } else {
+      this._chars.unshift({ char_id: charId||null, char_name: charName||'?', char_alias: charAlias||null, org_name: orgName||null, msg_count: 1, last_at: new Date().toISOString() });
+    }
+    this._render();
+  },
+};
+
+window.MAPanel = MAPanel;
 
 /* ═══ SESSION MANAGER ══════════════════════════════════════════ */
 /* ═══ AUTO BACKUP — her 6 saatte bir tüm odalar + mesajlar ═══════════════ */
