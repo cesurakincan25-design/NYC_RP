@@ -277,20 +277,23 @@ const DMContext = {
       }
     } catch (e) { /* first run */ }
 
-    // Observer AI özetlerini de yükle (Supabase)
+    // Observer AI özetlerini de yükle (Firebase)
     await this._loadObserverSummaries();
   },
 
   async _loadObserverSummaries() {
     try {
-      const cfg = window.DM_CONFIG;
-      if (!cfg?.supaUrl || !cfg?.supaKey) return;
-      const res = await fetch(
-        `${cfg.supaUrl}/rest/v1/ai_summaries?summary_type=eq.rp_session&order=created_at.desc&limit=3&select=title,content,created_at`,
-        { headers: { apikey: cfg.supaKey, Authorization: `Bearer ${cfg.supaKey}` } }
+      if (!window._fbDb || !window._fbFirestore) return;
+      const {collection, query, where, orderBy, limit, getDocs} = window._fbFirestore;
+      const db = window._fbDb;
+      const q = query(
+        collection(db, 'ai_summaries'),
+        where('summary_type', '==', 'rp_session'),
+        orderBy('created_at', 'desc'),
+        limit(3)
       );
-      if (!res.ok) return;
-      const rows = await res.json();
+      const snap = await getDocs(q);
+      const rows = snap.docs.map(d => d.data());
       if (!rows?.length) return;
       // Observer özetlerini context window başına ekle (tekrar ekleme önlemi)
       const existing = new Set(this._window.map(e => e.summary?.slice(0,40)));
