@@ -6368,43 +6368,39 @@ const MasterAgent = {
     // MA mesajı mı? (char_name kontrolü — bu da sayılmaz)
     if ((msg.char_name || '').toLowerCase().includes('master agent')) return;
 
-    // MA'nın son mesajını bul: sırasıyla kontrol et
-    let maRecentlySpoke = false;
+    // MA bu odada hiç mesaj attı mı? (zaman sınırı YOK — oto-devam açık olduğu sürece aktif)
+    let maHasSpoken = false;
     const now = Date.now();
-    const win = this._autoWindow;
 
     // 1) Bu session'da MA mesaj attı mı?
-    if (this._lastSentAt > 0 && now - this._lastSentAt < win) {
-      maRecentlySpoke = true;
+    if (this._lastSentAt > 0) {
+      maHasSpoken = true;
     }
 
-    // 2) localStorage'da kayıtlı son MA mesajı zamanı (sayfa refresh sonrası da çalışır)
-    if (!maRecentlySpoke) {
+    // 2) localStorage'da kayıtlı son MA mesajı var mı?
+    if (!maHasSpoken) {
       try {
         const lsTime = parseInt(localStorage.getItem('ma_lastSentAt') || '0', 10);
-        if (lsTime > 0 && now - lsTime < win) {
-          maRecentlySpoke = true;
+        if (lsTime > 0) {
+          maHasSpoken = true;
           this._lastSentAt = lsTime; // sync
         }
       } catch(_) {}
     }
 
-    // 3) S.msgs içinde son MA mesajını ara (fallback)
-    if (!maRecentlySpoke) {
+    // 3) S.msgs içinde herhangi bir MA mesajı var mı? (fallback — oda tarihine bak)
+    if (!maHasSpoken) {
       const roomMsgs = (S?.msgs?.[S?.roomId] || []);
-      const recent = roomMsgs.slice(-15);
-      const lastMAMsg = [...recent].reverse().find(m => (m.char_name || '').toLowerCase().includes('master agent'));
+      const lastMAMsg = [...roomMsgs].reverse().find(m => (m.char_name || '').toLowerCase().includes('master agent'));
       if (lastMAMsg) {
+        maHasSpoken = true;
         const lastMATime = new Date(lastMAMsg.created_at).getTime();
-        if (now - lastMATime < win) {
-          maRecentlySpoke = true;
-          this._lastSentAt = lastMATime;
-          try { localStorage.setItem('ma_lastSentAt', lastMATime); } catch(_) {}
-        }
+        this._lastSentAt = lastMATime;
+        try { localStorage.setItem('ma_lastSentAt', lastMATime); } catch(_) {}
       }
     }
 
-    if (!maRecentlySpoke) return;
+    if (!maHasSpoken) return;
     // Cooldown kontrolü
     if (now - this._lastAutoAt < this._autoCooldown) return;
     // Tetikle
