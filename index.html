@@ -578,8 +578,6 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 <script>
 'use strict';
 /* ═══ CONSTANTS ═════════════════════════════════════════ */
-const SUPA_URL='https://vhzroetspwbwmouqkcxe.supabase.co';
-const SUPA_KEY='sb_publishable_kM788c6s2-mOyndFnIdc1A_EKPSIz8J';
 const GEM_MDL = () => window.DM_CONFIG?.geminiModel || 'gemini-3.6-flash';
 
 // Shared Gemini REST helper — Observer AI + DM Engine her ikisi de bunu kullanır
@@ -619,8 +617,6 @@ async function _geminiGenerate(prompt, opts={}) {
   }
   return text;
 }
-// Gemini API key moved to Edge Function (gemini-proxy)
-// Direct key removed for security — calls go via SUPA_URL/functions/v1/gemini-proxy
 const ADM_PASS='1';
 const DB_TO=8000;
 const EMOJIS=['👍','❤️','😂','😮','😢','🔥','⚔️','💀','🎯','🤝','👀','💬'];
@@ -631,8 +627,6 @@ const USERS=[
   {id:'nes',  name:'Nes',  role:'Admin',color:'#e8a74a'},
   {id:'aley', name:'Aley', role:'Admin',color:'#e05555'},
 ];
-const SH={'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'return=representation'};
-
 /* ═══ HELPERS ═══════════════════════════════════════════ */
 function OM(id){document.getElementById(id)?.classList.remove('hidden');}
 function CM(id){document.getElementById(id)?.classList.add('hidden');}
@@ -668,38 +662,22 @@ function _fbTs(t){
 }
 
 /* ═══ DB (Firebase Firestore adapter) ═══════════════════ */
-// Messaging collections:
+// All collections live in Firebase Firestore:
 //   rp_rooms/{roomId}
 //   rp_rooms/{roomId}/messages/{msgId}
 //   rp_presence/{charId}
 //   dm_conversations/{convId}
 //   dm_conversations/{convId}/messages/{msgId}
 //   rp_player_profiles/{userId}
-//
-// Observer AI tables remain on Supabase (ai_summaries, incidents,
-//   character_memories, relationship_changes, ai_flags, ai_agent_logs,
-//   ai_observer_config) — accessed via _SUPA helper below.
+//   ai_summaries/{id}
+//   incidents/{id}
+//   character_memories/{id}
+//   relationship_changes/{id}
+//   ai_flags/{id}
+//   ai_agent_logs/{id}
+//   observer_config/main  (single doc with all OAI settings)
 //
 const DB={
-  // ── Supabase helper (Observer AI only) ──────────────
-  async _sf(u,o={}){
-    const c=new AbortController(),t=setTimeout(()=>c.abort(),DB_TO);
-    try{const r=await fetch(u,{...o,signal:c.signal});clearTimeout(t);return r;}
-    catch(e){clearTimeout(t);if(e.name==='AbortError')throw new Error('DB timeout');throw e;}
-  },
-  _supaGet(p){return this._sf(`${SUPA_URL}/rest/v1/${p}`,{headers:SH}).then(r=>{if(!r.ok)throw new Error('Supa '+r.status);return r.json();}).catch(()=>[]);},
-  _supaPost(t,b){return this._sf(`${SUPA_URL}/rest/v1/${t}`,{method:'POST',headers:SH,body:JSON.stringify(b)}).then(r=>{if(!r.ok)return[];return r.json();}).catch(()=>[]);},
-  _supaPatch(t,q,b){return this._sf(`${SUPA_URL}/rest/v1/${t}?${q}`,{method:'PATCH',headers:SH,body:JSON.stringify(b)}).then(r=>{if(!r.ok)return[];return r.json();}).catch(()=>[]);},
-
-  // ── Supabase tables still on Supabase ───────────────
-  _SUPA_TABLES:new Set([
-    'ai_summaries','incidents','character_memories','relationship_changes',
-    'ai_flags','ai_observer_config','ai_agent_logs',
-  ]),
-
-  // ── Router: pick correct backend ────────────────────
-  _isSupa(t){return this._SUPA_TABLES.has(t.split('?')[0].split('/')[0]);},
-
   // ── Firestore helpers ────────────────────────────────
   async _getFs(){return _fbReady();},
 
@@ -728,8 +706,6 @@ const DB={
   async get(path){
     const [table,...rest]=path.split('?');
     const qs=rest.join('?');
-    if(this._isSupa(table))return this._supaGet(path);
-
     const {db,fs}=await this._getFs();
     const {collection,query,where,orderBy,limit,getDocs,doc,getDoc}=fs;
 
@@ -815,12 +791,23 @@ const DB={
       return snap.docs.map(d=>({...d.data(),id:d.id}));
     }
 
+    // ── Observer AI flat collections ─────────────────
+    if(['ai_summaries','incidents','character_memories','relationship_changes','ai_flags','ai_agent_logs'].includes(table)){
+      const q=this._parseQ(qs);
+      let ref=collection(db,table);
+      let constraints=[];
+      Object.entries(q.filters).forEach(([k,v])=>constraints.push(where(k,'==',v)));
+      if(q.order)constraints.push(orderBy(q.order,q.orderDir==='desc'?'desc':'asc'));
+      if(q.limit)constraints.push(limit(q.limit));
+      const snap=await getDocs(query(ref,...constraints));
+      return snap.docs.map(d=>({id:d.id,...d.data(),created_at:_fbTs(d.data().created_at)}));
+    }
+
     console.warn('[DB.get] Unknown table:',table);return[];
   },
 
   // ── post(table, body) → [{id,...}] ──────────────────
   async post(table,body){
-    if(this._isSupa(table))return this._supaPost(table,body);
     const {db,fs}=await this._getFs();
     const {collection,doc,setDoc,addDoc,serverTimestamp}=fs;
     const now=new Date().toISOString();
@@ -856,12 +843,18 @@ const DB={
       await setDoc(doc(db,'rp_player_profiles',userId),{...body,updated_at:now},{merge:true});
       return[{...body,id:userId}];
     }
+    // ── Observer AI flat collections ────────────────
+    if(['ai_summaries','incidents','character_memories','relationship_changes','ai_flags','ai_agent_logs'].includes(table)){
+      const id=_fbId();
+      const data={...body,id,created_at:now};
+      await setDoc(doc(db,table,id),data);
+      return[data];
+    }
     console.warn('[DB.post] Unknown table:',table);return[];
   },
 
   // ── patch(table, query, body) ────────────────────────
   async patch(table,qs,body){
-    if(this._isSupa(table))return this._supaPatch(table,qs,body);
     const {db,fs}=await this._getFs();
     const {doc,updateDoc,getDocs,collection,query,where,writeBatch}=fs;
 
@@ -905,12 +898,20 @@ const DB={
       return[];
     }
     if(table==='rp_presence'){return[];}// presence uses upsert
+    // ── Observer AI flat collections ─────────────────
+    if(['ai_summaries','incidents','character_memories','relationship_changes','ai_flags','ai_agent_logs'].includes(table)){
+      const q=this._parseQ(qs);const idVal=q.filters.id||q.filters.key;
+      if(idVal){
+        await fs.updateDoc(fs.doc(db,table,String(idVal)),body).catch(()=>{});
+        return[{id:idVal,...body}];
+      }
+      return[];
+    }
     console.warn('[DB.patch] Unknown table:',table);return[];
   },
 
   // ── upsert(table, conflictKey, body) ────────────────
   async upsert(table,onConflict,body){
-    if(this._isSupa(table))return this._supaPost(table,body);
     const {db,fs}=await this._getFs();
     const {doc,setDoc}=fs;
     const now=new Date().toISOString();
@@ -2191,38 +2192,85 @@ const Adm={
     S.rooms.forEach(r=>{if(!sel.querySelector(`option[value="${r.id}"]`)){const o=document.createElement('option');o.value=r.id;o.textContent='#'+r.name;sel.appendChild(o);}});
   },
   async loadCfg(){
+    // Config: Firebase observer_config/main (single doc)
+    // Boolean toggles + editable text/number fields
+    const BOOL_KEYS=['enabled','dry_run','write_summaries','write_incidents','write_memories','write_rel_changes'];
+    const NUM_KEYS=['batch_window_ms','min_confidence','read_interval'];
+    const STR_KEYS=['gemini_model'];
     try{
-      const rows=await DB.get('ai_observer_config?order=key.asc');
-      const tkeys=new Set(['enabled','dry_run','write_summaries','write_incidents','write_memories','write_rel_changes']);
-      document.getElementById('cfg-toggles').innerHTML='';document.getElementById('cfg-vals').innerHTML='';
-      rows.forEach(row=>{
-        if(tkeys.has(row.key)){
-          const el=document.createElement('div');el.className='cr';
-          el.innerHTML=`<span class="ck">${row.key}</span><div class="toggle ${row.value==='true'?'on':''}" data-key="${row.key}" onclick="Adm.toggleCfg(this)"></div>`;
-          document.getElementById('cfg-toggles').appendChild(el);
-        }else{
-          const el=document.createElement('div');el.className='cr';
-          el.innerHTML=`<span class="ck">${row.key}</span><span class="cv">${row.value}</span>`;
-          document.getElementById('cfg-vals').appendChild(el);
-        }
+      const {db,fs}=await _fbReady();
+      const snap=await fs.getDoc(fs.doc(db,'observer_config','main'));
+      // Default config if doc doesn't exist yet
+      const defaults={
+        enabled:false,dry_run:false,
+        write_summaries:true,write_incidents:true,write_memories:true,write_rel_changes:true,
+        batch_window_ms:300000,min_confidence:0.5,read_interval:25,
+        gemini_model:GEM_MDL(),
+      };
+      const cfg=snap.exists()?{...defaults,...snap.data()}:defaults;
+      // Sync to OAI.CFG
+      OAI.CFG.DRY_RUN=!!cfg.dry_run;OAI.CFG.WRITE_SUMMARIES=!!cfg.write_summaries;
+      OAI.CFG.WRITE_INCIDENTS=!!cfg.write_incidents;OAI.CFG.WRITE_MEMORIES=!!cfg.write_memories;
+      OAI.CFG.WRITE_REL_CHANGES=!!cfg.write_rel_changes;OAI.CFG.MIN_CONFIDENCE=cfg.min_confidence||0.5;
+      if(cfg.gemini_model&&window.DM_CONFIG)window.DM_CONFIG.geminiModel=cfg.gemini_model;
+
+      const tEl=document.getElementById('cfg-toggles');const vEl=document.getElementById('cfg-vals');
+      tEl.innerHTML='';vEl.innerHTML='';
+
+      BOOL_KEYS.forEach(key=>{
+        const on=!!cfg[key];
+        const el=document.createElement('div');el.className='cr';
+        el.innerHTML=`<span class="ck">${key.replace(/_/g,' ')}</span><div class="toggle ${on?'on':''}" data-key="${key}" onclick="Adm.toggleCfg(this)"></div>`;
+        tEl.appendChild(el);
       });
-    }catch(e){document.getElementById('cfg-toggles').innerHTML='<div style="padding:12px;font-family:var(--mono);font-size:11px;color:var(--t3)">Phase 3 migration gerekli</div>';}
+      STR_KEYS.forEach(key=>{
+        const el=document.createElement('div');el.className='cr';
+        el.innerHTML=`<span class="ck">${key.replace(/_/g,' ')}</span><input class="cfg-inp" data-key="${key}" value="${cfg[key]||''}" onblur="Adm.saveCfgVal(this)" style="font-family:var(--mono);font-size:11px;background:var(--bg3);border:1px solid var(--ln);border-radius:3px;color:var(--t0);padding:3px 6px;width:160px">`;
+        vEl.appendChild(el);
+      });
+      NUM_KEYS.forEach(key=>{
+        const el=document.createElement('div');el.className='cr';
+        el.innerHTML=`<span class="ck">${key.replace(/_/g,' ')}</span><input class="cfg-inp" type="number" data-key="${key}" value="${cfg[key]??''}" onblur="Adm.saveCfgVal(this)" style="font-family:var(--mono);font-size:11px;background:var(--bg3);border:1px solid var(--ln);border-radius:3px;color:var(--t0);padding:3px 6px;width:90px">`;
+        vEl.appendChild(el);
+      });
+    }catch(e){document.getElementById('cfg-toggles').innerHTML='<div style="padding:12px;font-family:var(--mono);font-size:11px;color:var(--t3)">Config yüklenemedi: '+e.message+'</div>';}
   },
   async toggleCfg(el){
-    const key=el.dataset.key,isOn=el.classList.contains('on'),nv=isOn?'false':'true';
+    const key=el.dataset.key,isOn=el.classList.contains('on'),nv=!isOn;
     el.classList.toggle('on');
     try{
-      await DB.patch('ai_observer_config',`key=eq.${key}`,{value:nv});toast(`${key} → ${nv}`,'success');
-      const m={dry_run:v=>OAI.CFG.DRY_RUN=v==='true',write_summaries:v=>OAI.CFG.WRITE_SUMMARIES=v==='true',write_incidents:v=>OAI.CFG.WRITE_INCIDENTS=v==='true',write_memories:v=>OAI.CFG.WRITE_MEMORIES=v==='true',write_rel_changes:v=>OAI.CFG.WRITE_REL_CHANGES=v==='true',enabled:v=>{if(v==='false')Adm.stopObs();}};
+      const {db,fs}=await _fbReady();
+      await fs.setDoc(fs.doc(db,'observer_config','main'),{[key]:nv,updated_at:new Date().toISOString()},{merge:true});
+      toast(`${key.replace(/_/g,' ')} → ${nv?'açık':'kapalı'}`,'success');
+      const m={
+        dry_run:v=>OAI.CFG.DRY_RUN=v,
+        write_summaries:v=>OAI.CFG.WRITE_SUMMARIES=v,
+        write_incidents:v=>OAI.CFG.WRITE_INCIDENTS=v,
+        write_memories:v=>OAI.CFG.WRITE_MEMORIES=v,
+        write_rel_changes:v=>OAI.CFG.WRITE_REL_CHANGES=v,
+        enabled:v=>{if(!v)Adm.stopObs();},
+      };
       if(m[key])m[key](nv);
     }catch(e){el.classList.toggle('on');toast('Güncelleme başarısız','error');}
   },
+  async saveCfgVal(inp){
+    const key=inp.dataset.key,rawVal=inp.value.trim();
+    const val=inp.type==='number'?parseFloat(rawVal):rawVal;
+    try{
+      const {db,fs}=await _fbReady();
+      await fs.setDoc(fs.doc(db,'observer_config','main'),{[key]:val,updated_at:new Date().toISOString()},{merge:true});
+      toast(`${key.replace(/_/g,' ')} kaydedildi`,'success');
+      if(key==='gemini_model'&&window.DM_CONFIG)window.DM_CONFIG.geminiModel=val;
+      if(key==='min_confidence')OAI.CFG.MIN_CONFIDENCE=val;
+      if(key==='read_interval')OAI.CFG.READ_INTERVAL=val;
+    }catch(e){toast('Kaydedilemedi: '+e.message,'error');}
+  },
   async refreshFeed(){
     try{
-      this.feed.summaries=await DB.get('ai_summaries?summary_type=eq.rp_session&order=created_at.desc&limit=30&select=id,title,content,linked_chars,created_at').catch(()=>[]);
-      this.feed.incidents=await DB.get('incidents?source=eq.ai_agent&order=created_at.desc&limit=30&select=id,title,incident_type,severity,description,involved_chars,created_at').catch(()=>[]);
-      this.feed.memories=await DB.get('character_memories?ai_readable=eq.true&source_type=eq.rp_session&order=created_at.desc&limit=30&select=id,char_name,memory_type,title,content,importance,emotional_tag,created_at').catch(()=>[]);
-      this.feed.flags=await DB.get('ai_flags?status=eq.open&order=created_at.desc&limit=20&select=id,flag_type,severity,title,description,created_at').catch(()=>[]);
+      this.feed.summaries=await DB.get('ai_summaries?summary_type=eq.rp_session&order=created_at.desc&limit=30').catch(()=>[]);
+      this.feed.incidents=await DB.get('incidents?source=eq.ai_agent&order=created_at.desc&limit=30').catch(()=>[]);
+      this.feed.memories=await DB.get('character_memories?ai_readable=eq.true&source_type=eq.rp_session&order=created_at.desc&limit=30').catch(()=>[]);
+      this.feed.flags=await DB.get('ai_flags?status=eq.open&order=created_at.desc&limit=20').catch(()=>[]);
       const fc=this.feed.flags.length;document.getElementById('flag-bdg').textContent=fc>0?`(${fc})`:'';
     }catch(e){}
     this.renderFeed();
@@ -2241,7 +2289,13 @@ const Adm={
     }
   },
   async resolveFlag(id,res){
-    try{await DB.patch('ai_flags',`id=eq.${id}`,{status:res,reviewed_at:new Date().toISOString()});this.feed.flags=this.feed.flags.filter(f=>f.id!==id);this.renderFeed();const fc=this.feed.flags.length;document.getElementById('flag-bdg').textContent=fc>0?`(${fc})`:'';toast(`Flag ${res}`,'success');}catch(e){toast('Hata','error');}
+    try{
+      const {db,fs}=await _fbReady();
+      await fs.updateDoc(fs.doc(db,'ai_flags',String(id)),{status:res,reviewed_at:new Date().toISOString()});
+      this.feed.flags=this.feed.flags.filter(f=>f.id!==id);this.renderFeed();
+      const fc=this.feed.flags.length;document.getElementById('flag-bdg').textContent=fc>0?`(${fc})`:'';
+      toast(`Flag ${res}`,'success');
+    }catch(e){toast('Hata','error');}
   },
   tab(el){document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('active'));el.classList.add('active');this.tab_=el.dataset.tab;this.renderFeed();},
   updStats(){
@@ -2249,7 +2303,7 @@ const Adm={
     document.getElementById('s-msg').textContent=s.msgs;document.getElementById('s-run').textContent=s.runs;
     document.getElementById('s-inc').textContent=s.incs;document.getElementById('s-mem').textContent=s.mems;
     if(s.lastRun)document.getElementById('last-run').textContent='Last: '+new Date(s.lastRun).toLocaleTimeString();
-    DB.get('ai_agent_logs?order=created_at.desc&limit=15&select=id,status,run_type,input_msg_count,incidents_written,memories_written,created_at,summary_id').then(rows=>{
+    DB.get('ai_agent_logs?order=created_at.desc&limit=15').then(rows=>{
       const el=document.getElementById('run-log');document.getElementById('run-cnt').textContent=rows.length+' runs';
       if(!rows.length){el.innerHTML='<div style="padding:12px;font-family:var(--mono);font-size:11px;color:var(--t3)">Henüz run yok</div>';return;}
       el.innerHTML='';
@@ -2977,14 +3031,9 @@ window.DM_CONFIG = {
   dbTable:          'nyc_db',
   collectionPrefix: '',        // NYC = no prefix; Tokyo uses 'tokyo_'
 
-  // ── Supabase (same as RP client) ────────────────────
-  supaUrl:    'https://vhzroetspwbwmouqkcxe.supabase.co',
-  supaKey:    'sb_publishable_kM788c6s2-mOyndFnIdc1A_EKPSIz8J',
-
-  // ── Gemini — key stored as Edge Function secret ─────
-  // Set with: supabase secrets set GEMINI_API_KEY=AIzaSy...
-  geminiKey:  '__GEMINI_KEY__',  // Replaced at build time by GitHub Actions
-  geminiModel:'gemini-3.6-flash',
+  // ── Gemini — key injected by GitHub Actions at build time ─────
+  geminiKey:  '__GEMINI_KEY__',
+  geminiModel:'gemini-3.6-flash',  // Editable from Admin → Observer AI config
 
   // ── Players (synced from USERS constant above) ──────
   players: [
