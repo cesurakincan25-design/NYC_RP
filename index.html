@@ -4722,7 +4722,7 @@ const FavChars = {
     let modal=document.getElementById('m-fav-chars');
     if(!modal){
       modal=document.createElement('div');modal.id='m-fav-chars';modal.className='mbd hidden';
-      modal.innerHTML=`<div class="mbox" id="fc-mbox" style="width:min(820px,95vw);height:min(680px,88vh);display:flex;flex-direction:column;resize:both;overflow:hidden;min-width:340px;min-height:300px">
+      modal.innerHTML=`<div class="mbox" id="fc-mbox" style="width:min(1100px,96vw);height:min(580px,82vh);display:flex;flex-direction:column;resize:both;overflow:hidden;min-width:420px;min-height:280px">
         <div class="mhd" id="fc-drag-handle" style="cursor:move;user-select:none">
           <span class="mti"><i class="fas fa-star" style="color:var(--gd);margin-right:6px"></i>Sık Oynanan Karakterler</span>
           <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
@@ -4746,7 +4746,7 @@ const FavChars = {
           <div id="fc-result-count" style="font-family:var(--mono);font-size:10px;color:var(--t3)">…</div>
         </div>
         <div class="mbdy" style="flex:1;overflow-y:auto;padding:0 16px 12px">
-          <div id="fc-grid" class="cpg" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))"></div>
+          <div id="fc-grid" class="cpg" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr))"></div>
         </div>
         <div class="mft">
           <button class="btn btn-g" onclick="FavChars._save([]);FavChars._renderGrid();FavChars._updateSidebar()"><i class="fas fa-broom"></i> Favorileri Temizle</button>
@@ -4769,9 +4769,11 @@ const FavChars = {
       // Org filter — populate
       const orgSel=modal.querySelector('#fc-org-filter');
       (S.orgs||[]).forEach(o=>{const opt=document.createElement('option');opt.value=o.id;opt.textContent=o.name;orgSel.appendChild(opt);});
-      // Player filter — populate
+      // Player filter — populate with actual users
       const playerSel=modal.querySelector('#fc-player-filter');
       (window.USERS||[]).forEach(p=>{const opt=document.createElement('option');opt.value=p.id;opt.textContent=p.name;playerSel.appendChild(opt);});
+      // Also populate from S._db players if available
+      if(window.DM_CONFIG?.players){DM_CONFIG.players.forEach(p=>{if(!(window.USERS||[]).find(u=>u.id===p.id)){const opt=document.createElement('option');opt.value=p.id;opt.textContent=p.name;playerSel.appendChild(opt);}});}
       // Filter change events
       ['#fc-org-filter','#fc-player-filter','#fc-status-filter','#fc-fav-filter'].forEach(sel=>{
         modal.querySelector(sel).addEventListener('change',e=>{
@@ -4798,10 +4800,10 @@ const FavChars = {
     const btn=document.getElementById('fc-size-toggle');
     if(!box)return;
     if(!this._expanded){
-      box.style.cssText='width:96vw;height:92vh;display:flex;flex-direction:column;resize:both;overflow:hidden;min-width:340px;min-height:300px;position:fixed;left:2vw;top:4vh;margin:0';
+      box.style.cssText='width:98vw;height:90vh;display:flex;flex-direction:column;resize:both;overflow:hidden;min-width:420px;min-height:280px;position:fixed;left:1vw;top:5vh;margin:0';
       btn.innerHTML='<i class="fas fa-compress"></i>';
     }else{
-      box.style.cssText='width:min(820px,95vw);height:min(680px,88vh);display:flex;flex-direction:column;resize:both;overflow:hidden;min-width:340px;min-height:300px';
+      box.style.cssText='width:min(1100px,96vw);height:min(580px,82vh);display:flex;flex-direction:column;resize:both;overflow:hidden;min-width:420px;min-height:280px';
       btn.innerHTML='<i class="fas fa-expand"></i>';
     }
     this._expanded=!this._expanded;
