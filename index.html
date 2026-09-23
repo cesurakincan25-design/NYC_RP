@@ -2607,6 +2607,15 @@ const OAI={
         }
       }
       if(parsed.session_summary?.summary)UI.showAI('📋 '+parsed.session_summary.summary);
+      // MA hook — notify MasterAgent of completed OAI run (no new Gemini call, just queued context)
+      if(window.MasterAgent && parsed.session_summary?.summary){
+        const oaiNote = '[OAI TAMAMLANDI] '+messages.length+' mesaj işlendi.\n'
+          +'Özet: '+parsed.session_summary.summary+'\n'
+          +(parsed.incidents?.length?'Olaylar: '+parsed.incidents.map(i=>i.title).join(', '):'')
+          +(parsed.character_memories?.length?'\nAnılar: '+parsed.character_memories.length+' adet':'');
+        MasterAgent._history.push({role:'user',parts:[{text:oaiNote}]});
+        MasterAgent._history.push({role:'model',parts:[{text:'[OAI özeti alındı, hazırım.]'}]});
+      }
     }catch(e){console.error('[OAI] Pipeline:',e);this.stats.errors++;}
     finally{
       if(this.running)Adm.setSt('active','Active');
@@ -3689,24 +3698,51 @@ const MasterAgent = {
   },
 
   /* ── Build context string injected into every user turn ─ */
-  _liveCtx() {
+  /* Billing-efficient: transcript only on first turn or explicit request.
+     Subsequent turns get header only (model already has context). */
+  _liveCtx(includeTranscript = false) {
     const rpTime = S.roomId ? RpTime.get(S.roomId) : '—';
     const oaiStats = OAI ? `işlenen: ${OAI._processed||0}, kuyruk: ${OAI.Batcher?._queue?.length||0}` : '—';
+    const header = `[CANLI BAĞLAM | RP: ${rpTime} | OAI: ${oaiStats} | Oda: ${S.roomId||'—'} | Karakter: ${S.activeChar?.name||'—'}]`;
 
-    // Last 30 messages from active room
-    const msgs = (S.msgs[S.roomId] || []).slice(-30);
-    let transcript = '';
-    if (msgs.length) {
-      transcript = '\n\n== SON MESAJLAR (aktif oda: ' + (S.roomId||'?') + ') ==\n' +
-        msgs.map(m => {
-          const t = m.rp_time ? m.rp_time.slice(11,16) : (m.created_at ? m.created_at.slice(11,16) : '??:??');
-          return `[${t}] ${m.char_name||'?'}${m.char_alias?' ('+m.char_alias+')':''}: ${(m.content||'').slice(0,200)}`;
-        }).join('\n');
-    } else {
-      transcript = '\n\n== SON MESAJLAR: (bu odada henüz mesaj yok) ==';
-    }
+    if (!includeTranscript) return header;
 
-    return `[CANLI BAĞLAM | RP: ${rpTime} | OAI: ${oaiStats} | Oda: ${S.roomId||'—'} | Karakter: ${S.activeChar?.name||'—'}]${transcript}`;
+    // Smart transcript: last N messages, length-adaptive truncation
+    const allMsgs = (S.msgs[S.roomId] || []);
+    // Pick last 50–100 msgs depending on avg length
+    const sample = allMsgs.slice(-20);
+    const avgLen = sample.length
+      ? sample.reduce((s, m) => s + (m.content||'').length, 0) / sample.length
+      : 80;
+    // Short messages (<80 chars avg) → take 100, long (>200) → take 50, else 70
+    const take = avgLen < 80 ? 100 : avgLen > 200 ? 50 : 70;
+    const msgs = allMsgs.slice(-take);
+
+    // Per-message clip: keep proportional to avgLen so total stays ~3000 chars
+    const clipPer = Math.max(60, Math.min(300, Math.floor(3000 / Math.max(msgs.length, 1))));
+
+    if (!msgs.length) return header + '\n\n== SON MESAJLAR: (bu odada henüz mesaj yok) ==';
+
+    const lines = msgs.map(m => {
+      const t = m.rp_time ? m.rp_time.slice(11,16) : (m.created_at||'').slice(11,16) || '??:??';
+      const who = `${m.char_name||'?'}${m.char_alias?' ('+m.char_alias+')':''}`;
+      const body = (m.content||'').length > clipPer
+        ? (m.content||'').slice(0, clipPer) + '…'
+        : (m.content||'');
+      return `[${t}] ${who}: ${body}`;
+    });
+
+    return header + '\n\n== SON MESAJLAR (' + msgs.length + ' mesaj, oda: ' + (S.roomId||'?') + ') ==\n' + lines.join('\n');
+  },
+
+  /* ── Decide whether this turn needs the transcript ──── */
+  _needsTranscript(userText) {
+    // Always include on first message (history empty)
+    if (this._history.length === 0) return true;
+    // Include if user explicitly asks about the scene/rp
+    const triggers = ['oku', 'bak', 'ne oldu', 'sahne', 'mesaj', 'rol', 'transcript', 'son', 'anlat', 'özetle', 'durum'];
+    const low = userText.toLowerCase();
+    return triggers.some(t => low.includes(t));
   },
 
   /* ── Execute tool commands embedded in model reply ─────── */
@@ -3799,8 +3835,9 @@ const MasterAgent = {
     // Rebuild system prompt each time (active char/room may have changed)
     this._SYSTEM = this._buildSystem();
 
-    // Push user message
-    const fullUserText = this._liveCtx() + '\n\n' + userText;
+    // Push user message — include transcript only when needed (billing-efficient)
+    const withTranscript = this._needsTranscript(userText);
+    const fullUserText = this._liveCtx(withTranscript) + '\n\n' + userText;
     this._history.push({ role: 'user', parts: [{ text: fullUserText }] });
     this._renderHistory();
 
