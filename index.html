@@ -564,8 +564,8 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
     <div id="room-list"></div>
   </div>
   <div id="sb-footer">
-    <div class="ai-pill" id="ai-pill" onclick="Adm.openPanel()">
-      <div class="ai-dot"></div><span id="ai-pill-txt">AI OFF</span>
+    <div class="ai-pill" id="ai-pill" onclick="OAI&&OAI.running?OAI.stop():OAI&&OAI.start()" title="Observer AI'yı aç/kapat">
+      <div class="ai-dot"></div><span id="ai-pill-txt">Observer AI: OFF</span>
     </div>
     <div class="sb-user" onclick="Login._userMenu(event)" title="Profil / Çıkış">
       <div class="ava-sm" id="sess-ava"><span id="sess-ini">?</span><div class="online-dot"></div></div>
@@ -2124,7 +2124,7 @@ const RT={
           OAI.running=true;
           OAI._sessionOnlyMode=!!data.sessionOnly;
           const p=document.getElementById('ai-pill');
-          if(p){p.classList.add('on');document.getElementById('ai-pill-txt').textContent='AI ON';}
+          if(p){p.classList.add('on');document.getElementById('ai-pill-txt').textContent='Observer AI: ON';}
           // Admin panel butonları güncelle
           document.getElementById('obs-start')?.style && (document.getElementById('obs-start').style.display='none');
           document.getElementById('obs-session-start')?.style && (document.getElementById('obs-session-start').style.display='none');
@@ -2132,7 +2132,7 @@ const RT={
         } else if(!data.running && OAI.running){
           OAI.running=false;
           const p=document.getElementById('ai-pill');
-          if(p){p.classList.remove('on','thinking');document.getElementById('ai-pill-txt').textContent='AI OFF';}
+          if(p){p.classList.remove('on','thinking');document.getElementById('ai-pill-txt').textContent='Observer AI: OFF';}
           document.getElementById('obs-start')?.style && (document.getElementById('obs-start').style.display='');
           document.getElementById('obs-session-start')?.style && (document.getElementById('obs-session-start').style.display='');
           document.getElementById('obs-stop')?.style && (document.getElementById('obs-stop').style.display='none');
@@ -3715,7 +3715,7 @@ const OAI={
       console.log(`[OAI] World snapshot built — ${S.chars.length} chars, ${S.orgs.length} orgs`);
     }
     Adm.setSt('active','Active');
-    const p=document.getElementById('ai-pill');p.classList.add('on');document.getElementById('ai-pill-txt').textContent='AI ON';
+    const p=document.getElementById('ai-pill');p.classList.add('on');document.getElementById('ai-pill-txt').textContent='Observer AI: ON';
     toast('Observer AI başlatıldı','success');
     // Firestore'a OAI state yaz — diğer kullanıcılara senkronize et
     _fbReady().then(({db,fs})=>{
@@ -3726,7 +3726,7 @@ const OAI={
   stop(){
     this.running=false;this.Batcher.buf=[];clearTimeout(this.Batcher.ft);clearTimeout(this.Batcher.it);
     Adm.setSt('','Offline');
-    const p=document.getElementById('ai-pill');p.classList.remove('on','thinking');document.getElementById('ai-pill-txt').textContent='AI OFF';
+    const p=document.getElementById('ai-pill');p.classList.remove('on','thinking');document.getElementById('ai-pill-txt').textContent='Observer AI: OFF';
     // Firestore'a OAI state yaz — diğer kullanıcılara senkronize et
     _fbReady().then(({db,fs})=>{
       const {doc,setDoc}=fs;
@@ -3735,7 +3735,7 @@ const OAI={
   },
   async process(messages){
     this.stats.runs++;this.stats.msgs+=messages.length;this.stats.lastRun=new Date().toISOString();
-    const p=document.getElementById('ai-pill');p.classList.remove('on');p.classList.add('thinking');document.getElementById('ai-pill-txt').textContent='AI…';
+    const p=document.getElementById('ai-pill');p.classList.remove('on');p.classList.add('thinking');document.getElementById('ai-pill-txt').textContent='Observer AI…';
     try{
       // Extract only chars/orgs actually present in this batch — token efficient
       const batchCharIds=new Set(messages.map(m=>m.char_id).filter(Boolean));
@@ -3804,7 +3804,7 @@ const OAI={
     finally{
       if(this.running)Adm.setSt('active','Active');
       p.classList.remove('thinking');if(this.running)p.classList.add('on');
-      document.getElementById('ai-pill-txt').textContent=this.running?'AI ON':'AI OFF';
+      document.getElementById('ai-pill-txt').textContent=this.running?'Observer AI: ON':'Observer AI: OFF';
       document.getElementById('last-run').textContent='Last: '+new Date().toLocaleTimeString();
       Adm.refreshFeed();Adm.updStats();
     }
@@ -5284,24 +5284,36 @@ Login._start=async function(u){
       </div>
 
       <!-- Quick actions -->
-      <div style="display:flex;gap:6px;padding:8px 16px;border-top:1px solid var(--ln);background:var(--bg1);flex-wrap:wrap">
-        <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Mevcut RP durumunu özetle.')"><i class="fas fa-clipboard-list"></i> Durum</button>
-        <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Observer AI birikmiş mesajlarını hemen işle ve bana sonuçları söyle. FLUSH_OAI')"><i class="fas fa-bolt"></i> OAI Flush</button>
-        <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('DM bağlamını şimdi güncelle ve son gelişmeleri özetle. READ_DM')"><i class="fas fa-book-open"></i> DM Güncelle</button>
-        <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Mevcut RP atmosferine uygun küçük bir sokak olayı veya NPC hareketi yarat ve doğrudan sahneye yaz (SEND_MSG kullan).')"><i class="fas fa-globe"></i> Olay</button>
-        <button class="adm-btn" style="font-size:10px;border-color:rgba(232,167,74,.4);color:var(--am)" onclick="MASidebar.setupAct()"><i class="fas fa-city"></i> Setup At</button>
-        <button class="adm-btn" style="font-size:10px;border-color:rgba(155,111,212,.4);color:var(--pu)" onclick="MAPanel.loadMAChars()"><i class="fas fa-sync-alt"></i> Karakterleri Yenile</button>
+      <div style="display:flex;gap:5px;padding:8px 16px;border-top:1px solid var(--ln);background:var(--bg1);flex-wrap:wrap;align-items:center">
+        <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Mevcut RP durumunu özetle.')"><i class="fas fa-clipboard-list"></i> 📋 Durum</button>
+        <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Observer AI birikmiş mesajlarını hemen işle ve bana sonuçları söyle. FLUSH_OAI')"><i class="fas fa-bolt"></i> ⚡ OAI</button>
+        <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('DM bağlamını şimdi güncelle ve son gelişmeleri özetle. READ_DM')"><i class="fas fa-book-open"></i> 📖 DM</button>
+        <button class="adm-btn" style="font-size:10px" onclick="MasterAgent.send('Mevcut RP atmosferine uygun küçük bir sokak olayı veya NPC hareketi yarat ve doğrudan sahneye yaz (SEND_MSG kullan).')"><i class="fas fa-globe"></i> 🌐 Olay</button>
+        <button class="adm-btn" style="font-size:10px;border-color:rgba(232,167,74,.4);color:var(--am)" onclick="MASidebar.setupAct()"><i class="fas fa-city"></i> 🌆 Setup At</button>
+        <button class="adm-btn" style="font-size:10px" onclick="MAPanel._entityCheckPanel()" title="Son mesajlarda geçen entity'leri tara"><i class="fas fa-tags"></i> 🏷️ Entity</button>
+        <button class="adm-btn" style="font-size:10px;border-color:rgba(74,143,226,.4);color:var(--ac)" onclick="Session.startDialog()" title="Yeni RP Sessionu başlat"><i class="fas fa-film"></i> 🎬 Session</button>
+        <button id="ma-panel-auto-toggle" class="adm-btn" style="font-size:10px" onclick="MAPanel._toggleAuto()" title="MA otomatik sahne devam ettirme"><i class="fas fa-robot"></i> <span id="ma-panel-auto-txt">🤖 Oto: AÇ</span></button>
+        <button id="ma-panel-oai-btn" class="adm-btn" style="font-size:10px" onclick="MAPanel._toggleOAI()" title="Observer AI aç/kapat"><span id="ma-panel-oai-txt">Observer AI: OFF</span></button>
+        <button class="adm-btn" style="font-size:10px;border-color:rgba(155,111,212,.4);color:var(--pu)" onclick="MAPanel.loadMAChars()"><i class="fas fa-sync-alt"></i></button>
       </div>
 
-      <!-- Input -->
-      <div style="display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--ln);background:var(--bg0)">
-        <textarea id="ma-inp" rows="2" placeholder="Master Agent'a bir soru sor veya eylem isteyin… (Enter gönder, Shift+Enter satır atla)"
-          style="flex:1;background:var(--bg2);border:1px solid var(--ln);color:var(--t1);border-radius:8px;padding:8px 12px;font-family:var(--sans);font-size:12px;resize:none;line-height:1.5"
-          onkeydown="MasterAgent.onKey(event)"></textarea>
-        <button onclick="MasterAgent.submit()"
-          style="align-self:flex-end;background:linear-gradient(135deg,#7c4dff,#9b6fd4);border:none;color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;height:36px">
-          <i class="fas fa-paper-plane"></i>
-        </button>
+      <!-- Input area with room selector -->
+      <div style="border-top:1px solid var(--ln);background:var(--bg0)">
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 16px 0">
+          <span style="font-family:var(--mono);font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;white-space:nowrap">Mesaj Odası:</span>
+          <select id="ma-room-select" style="flex:1;background:var(--bg2);border:1px solid var(--ln);color:var(--t1);border-radius:5px;padding:3px 6px;font-family:var(--mono);font-size:10px;outline:none">
+            <option value="">— Aktif oda (otomatik) —</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;padding:8px 16px 10px">
+          <textarea id="ma-inp" rows="2" placeholder="Master Agent'a bir soru sor veya eylem isteyin… (Enter gönder, Shift+Enter satır atla)"
+            style="flex:1;background:var(--bg2);border:1px solid var(--ln);color:var(--t1);border-radius:8px;padding:8px 12px;font-family:var(--sans);font-size:12px;resize:none;line-height:1.5"
+            onkeydown="MasterAgent.onKey(event)"></textarea>
+          <button onclick="MasterAgent.submit()"
+            style="align-self:flex-end;background:linear-gradient(135deg,#7c4dff,#9b6fd4);border:none;color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;height:36px">
+            <i class="fas fa-paper-plane"></i>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -5488,6 +5500,7 @@ Object.assign(window.DMPanel, {
     document.getElementById('view-rp').style.display = 'none';
     document.getElementById('view-dm').style.display = 'flex';
     if (window.MAPanel && !MAPanel._chars?.length) MAPanel.loadMAChars();
+    if (window.MAPanel) MAPanel._syncPanelState();
   },
 
   /* ── Modal action stubs (triggered from modal buttons) ── */
@@ -5640,9 +5653,11 @@ const MasterAgent = {
       'GEN_EVENT          → (Sadece GM onayı gereken büyük olaylar için) Dünya olayı modalını aç',
       'GEN_DISPATCH:NPC_ID → (Sadece GM onayı gereken durumlar için) Dispatch modalını aç',
       '',
-      'SEND_MSG:{"content":"Mesaj metni","char_name":"Karakter Adı"}',
+      'SEND_MSG:{"content":"Mesaj metni","char_name":"Karakter Adı","room_id":"ODA_ID"}',
       '  → RP odasına belirtilen karakter adına mesaj atar — EN SIK KULLANACAĞIN KOMUT BU.',
       '  → room_id belirtilmezse aktif oda kullanılır.',
+      '  → Kullanıcı mesajı [PANEL ODA SEÇİMİ: room_id=X, room_name="Y"] önekiyle başlıyorsa,',
+      '    SEND_MSG içinde o room_id\'yi kullan (kullanıcı hangi odaya yazılmasını istediğini seçti).',
       '  → Aksiyon/emote için yıldız kullan: *Araçtan iner ve sahneye yaklaşır*',
       '',
       '  KARİŞTER KURALI:',
@@ -6276,9 +6291,16 @@ const MasterAgent = {
   submit() {
     const inp = document.getElementById('ma-inp');
     if (!inp) return;
-    const txt = inp.value.trim();
+    let txt = inp.value.trim();
     if (!txt || this._busy) return;
     inp.value = '';
+    // Inject selected room if panel room-selector has a value
+    const roomSel = document.getElementById('ma-room-select');
+    if (roomSel && roomSel.value) {
+      const room = (S.rooms||[]).find(r=>String(r.id)===roomSel.value);
+      const roomName = room ? (room.name||room.slug||roomSel.value) : roomSel.value;
+      txt = `[PANEL ODA SEÇİMİ: room_id=${roomSel.value}, room_name="${roomName}"] ${txt}`;
+    }
     this.send(txt);
   },
 
@@ -6788,6 +6810,72 @@ const MAPanel = {
       this._chars.unshift({ char_id: charId||null, char_name: charName||'?', char_alias: charAlias||null, org_name: orgName||null, msg_count: 1, last_at: new Date().toISOString() });
     }
     this._render();
+  },
+
+  /* ── Observer AI toggle from MA panel ─────────────── */
+  _toggleOAI() {
+    if (!window.OAI) return;
+    if (OAI.running) { OAI.stop(); } else { OAI.start(); }
+    // Button text synced via existing ai-pill-txt update + here
+    setTimeout(() => {
+      const txt = document.getElementById('ma-panel-oai-txt');
+      const btn = document.getElementById('ma-panel-oai-btn');
+      if (!txt || !btn) return;
+      const on = OAI.running;
+      txt.textContent = on ? 'Observer AI: ON' : 'Observer AI: OFF';
+      btn.style.borderColor = on ? 'rgba(77,184,128,.4)' : 'rgba(var(--ln-rgb,80,80,90),.6)';
+      btn.style.color = on ? 'var(--gn)' : 'var(--t3)';
+    }, 150);
+  },
+
+  /* ── Auto-react toggle from MA panel ──────────────── */
+  _toggleAuto() {
+    if (!window.MasterAgent) return;
+    const isOn = MasterAgent._autoEnabled !== false;
+    MasterAgent._autoEnabled = !isOn;
+    const txt = document.getElementById('ma-panel-auto-txt');
+    if (txt) txt.textContent = MasterAgent._autoEnabled ? '🤖 Oto: AÇ' : '🤖 Oto: KAPALI';
+    // Keep sidebar toggle in sync
+    const sbTxt = document.getElementById('ma-auto-toggle');
+    if (sbTxt) sbTxt.textContent = MasterAgent._autoEnabled ? '🤖 Oto: AÇ' : '🤖 Oto: KAPALI';
+    toast('MA Oto: ' + (MasterAgent._autoEnabled ? 'AÇ' : 'KAPALI'), 'info');
+  },
+
+  /* ── Entity check from MA panel ───────────────────── */
+  _entityCheckPanel() {
+    if (window.MASidebar?.entityCheck) MASidebar.entityCheck();
+    else if (window.MasterAgent) MasterAgent.send('Son mesajlardaki karakterleri, araçları, örgütleri ve mülkleri tara. Veritabanına kaydedilmesi gereken yeni entity var mı? Varsa bana sor.');
+  },
+
+  /* ── Populate room selector dropdown ──────────────── */
+  _fillRoomSelect() {
+    const sel = document.getElementById('ma-room-select');
+    if (!sel) return;
+    // Clear old options except default
+    while (sel.options.length > 1) sel.remove(1);
+    (S.rooms || []).filter(r => !r.is_archived).forEach(r => {
+      const opt = document.createElement('option');
+      opt.value = r.id;
+      opt.textContent = r.name || r.slug || r.id;
+      sel.appendChild(opt);
+    });
+  },
+
+  /* ── Sync OAI button state on panel open ──────────── */
+  _syncPanelState() {
+    this._fillRoomSelect();
+    // OAI button
+    const txt = document.getElementById('ma-panel-oai-txt');
+    const btn = document.getElementById('ma-panel-oai-btn');
+    if (txt && btn) {
+      const on = window.OAI?.running;
+      txt.textContent = on ? 'Observer AI: ON' : 'Observer AI: OFF';
+      btn.style.borderColor = on ? 'rgba(77,184,128,.4)' : '';
+      btn.style.color = on ? 'var(--gn)' : '';
+    }
+    // Auto toggle
+    const autoTxt = document.getElementById('ma-panel-auto-txt');
+    if (autoTxt) autoTxt.textContent = (window.MasterAgent?.._autoEnabled !== false) ? '🤖 Oto: AÇ' : '🤖 Oto: KAPALI';
   },
 };
 
