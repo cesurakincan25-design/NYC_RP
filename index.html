@@ -5505,7 +5505,10 @@ Object.assign(window.DMPanel, {
   open() {
     document.getElementById('view-rp').style.display = 'none';
     document.getElementById('view-dm').style.display = 'flex';
-    if (window.MAPanel && !MAPanel._chars?.length) MAPanel.loadMAChars();
+    if (window.MAPanel) {
+      MAPanel._loadLS(); // localStorage'dan önce yükle — hızlı görünüm
+      if (!MAPanel._chars?.length) MAPanel.loadMAChars(); else { MAPanel._render(); MAPanel.loadMAChars(); }
+    }
     if (window.MAPanel) MAPanel._syncPanelState();
   },
 
@@ -6794,7 +6797,19 @@ window.MASidebar = MASidebar;
 
 /* ═══ MA PANEL — MA'nın oynadığı karakterleri listeler ════════════════════ */
 const MAPanel = {
-  _chars: [], // { char_id, char_name, char_alias, org_name, msg_count, last_at }
+  _chars: [], // { char_id, char_name, char_alias, org_name, msg_count, last_at, saved? }
+  _LS_KEY: 'ma_played_chars',
+
+  _saveLS() {
+    try { localStorage.setItem(this._LS_KEY, JSON.stringify(this._chars)); } catch(_) {}
+  },
+
+  _loadLS() {
+    try {
+      const raw = localStorage.getItem(this._LS_KEY);
+      if (raw) this._chars = JSON.parse(raw);
+    } catch(_) {}
+  },
 
   async loadMAChars() {
     const el = document.getElementById('ma-char-list');
@@ -6824,7 +6839,15 @@ const MAPanel = {
           if (m.org_name) entry.org_name = m.org_name;
         }
       }
+      // localStorage'daki kayıtlı karakterleri de birleştir (saved flag'i koru)
+      const lsChars = (() => { try { return JSON.parse(localStorage.getItem(this._LS_KEY)||'[]'); } catch(_) { return []; } })();
+      for (const lsC of lsChars) {
+        const key = lsC.char_id || ('__'+lsC.char_name);
+        if (!charMap.has(key)) charMap.set(key, { ...lsC, msg_count: lsC.msg_count||0 });
+        else if (lsC.saved) charMap.get(key).saved = true;
+      }
       this._chars = [...charMap.values()].sort((a,b) => (b.last_at||'').localeCompare(a.last_at||''));
+      this._saveLS();
       this._render();
     } catch(e) {
       console.warn('[MAPanel]', e);
@@ -6839,22 +6862,57 @@ const MAPanel = {
       el.innerHTML = '<div class="empty" style="font-size:11px;padding:20px;text-align:center"><i class="fas fa-robot" style="color:rgba(155,111,212,.3);font-size:20px"></i><p style="color:var(--t3);margin-top:8px">MA henüz karakter oynamadı.</p></div>';
       return;
     }
-    el.innerHTML = this._chars.map(c => {
+    el.innerHTML = this._chars.map((c, i) => {
       const initial = (c.char_name||'?')[0].toUpperCase();
       const alias = c.char_alias ? `<span style="color:var(--t3);font-size:9px"> "${c.char_alias}"</span>` : '';
       const org = c.org_name ? `<div style="font-size:9px;color:var(--t3);margin-top:1px"><i class="fas fa-building" style="font-size:8px"></i> ${c.org_name}</div>` : '';
-      const count = `<span style="font-size:9px;color:var(--t3);margin-left:auto">${c.msg_count} msg</span>`;
+      const count = `<span style="font-size:9px;color:var(--t3)">${c.msg_count} msg</span>`;
+      const saveBtn = c.saved
+        ? `<span style="font-size:9px;color:var(--gn);margin-left:2px" title="NYC_DB'ye kaydedildi"><i class="fas fa-check-circle"></i></span>`
+        : `<button onclick="event.stopPropagation();MAPanel.saveCharToDB(${i})" title="NYC_DB'ye NPC olarak kaydet"
+            style="font-size:9px;padding:1px 5px;border:1px solid rgba(155,111,212,.4);border-radius:3px;background:rgba(155,111,212,.12);color:var(--pu);cursor:pointer;margin-left:2px;line-height:1.4">💾 Kaydet</button>`;
       return `<div class="npc-card" style="padding:8px 10px;display:flex;align-items:flex-start;gap:8px;border-bottom:1px solid var(--ln);cursor:pointer"
         onclick="MAPanel.playAs(${JSON.stringify(c.char_id||c.char_name)}, ${JSON.stringify(c.char_name)})">
         <div style="width:28px;height:28px;border-radius:50%;background:rgba(155,111,212,.25);border:1px solid rgba(155,111,212,.4);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--pu);flex-shrink:0">${initial}</div>
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:4px">
-            <span style="font-size:11px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.char_name}</span>${alias}${count}
+          <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+            <span style="font-size:11px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.char_name}</span>${alias}
+            <span style="margin-left:auto;display:flex;align-items:center;gap:4px">${count}${saveBtn}</span>
           </div>
           ${org}
         </div>
       </div>`;
     }).join('');
+  },
+
+  async saveCharToDB(idx) {
+    const c = this._chars[idx];
+    if (!c || c.saved) return;
+    // Zaten NYC_DB'de kayıtlı mı kontrol et
+    if (c.char_id) {
+      const existing = (S.chars||[]).find(ch => String(ch.id) === String(c.char_id));
+      if (existing) {
+        c.saved = true; this._saveLS(); this._render();
+        toast(`${c.char_name} zaten DB'de mevcut`, 'info');
+        return;
+      }
+    }
+    // MA aracılığıyla SAVE_NPC komutu gönder
+    const npcDesc = [
+      c.char_alias ? `Alias: ${c.char_alias}` : '',
+      c.org_name   ? `Org: ${c.org_name}` : '',
+    ].filter(Boolean).join(', ');
+    const prompt = `SAVE_NPC karakteri NYC_DB'ye kaydet: name:"${c.char_name}"${npcDesc ? ', ' + npcDesc : ''}. Kısa bir açıklama ekle ve kaydet.`;
+    toast(`${c.char_name} kaydediliyor…`, 'info');
+    try {
+      await MasterAgent.send(prompt, { silent: true });
+      c.saved = true;
+      this._saveLS();
+      this._render();
+      toast(`✅ ${c.char_name} NYC_DB'ye kaydedildi`, 'ok');
+    } catch(e) {
+      toast(`❌ Kayıt hatası: ${e.message}`, 'error');
+    }
   },
 
   playAs(charIdOrName, charName) {
@@ -6876,8 +6934,9 @@ const MAPanel = {
       if (charAlias) existing.char_alias = charAlias;
       if (orgName) existing.org_name = orgName;
     } else {
-      this._chars.unshift({ char_id: charId||null, char_name: charName||'?', char_alias: charAlias||null, org_name: orgName||null, msg_count: 1, last_at: new Date().toISOString() });
+      this._chars.unshift({ char_id: charId||null, char_name: charName||'?', char_alias: charAlias||null, org_name: orgName||null, msg_count: 1, last_at: new Date().toISOString(), saved: false });
     }
+    this._saveLS();
     this._render();
   },
 
