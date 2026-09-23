@@ -1221,7 +1221,8 @@ const RP={
     // Aksi takdirde S.activeChar var mı bak, yoksa kullanıcı adını kullan
     let sendChar=S.activeChar||null;
     const firstLine=(txt.split('\n')[0]||'').trim();
-    const namePrefix=firstLine.match(/^(.+?):\s/);
+    // "**İsim:** " veya "İsim: " prefix'ten karakter tespiti
+    const namePrefix=firstLine.match(/^\*\*(.+?):\*\*\s/) || firstLine.match(/^(.+?):\s/);
     if(namePrefix){
       const nm=namePrefix[1].trim();
       const found=S.chars?.find(c=>c.name===nm||(c.alias&&c.alias===nm));
@@ -2262,16 +2263,18 @@ const UI={
       const tag=document.createElement('div');
       tag.className='ctag'+(isP?' ptag':'');
       if(!isP)tag.style.cssText=`background:${orgColor}18;border-color:${orgColor}44;color:${orgColor};`;
-      tag.title=`Tıkla → "${c.name}:" ekler  |  Sağ tık → Profil / Etiket / Primary`;
+      tag.title=`Tıkla → **${c.name}:** ekler  |  Sağ tık → Profil / Etiket / Sahneden Çıkar`;
       tag.innerHTML=`<div class="ctag-ava">${c.image?`<img src="${c.image}" onerror="this.parentNode.innerHTML='${ini}'" loading="lazy">`:ini}</div><span class="ctag-name">${c.name}</span><span class="ctag-rm">✕</span>`;
       tag.addEventListener('click',e=>{
         if(e.target.classList.contains('ctag-rm'))return;
         const inp=document.getElementById('msg-input');
-        // Tık → "İsim: " prefix ekle
-        const val=inp.value;const prefix=`${c.name}: `;
+        // Tık → "**İsim:** " bold markdown prefix ekle
+        const val=inp.value;const prefix=`**${c.name}:** `;
         inp.value=(val===''||val.endsWith('\n'))?val+prefix:val+'\n'+prefix;
         inp.focus();inp.style.height='auto';inp.style.height=Math.min(inp.scrollHeight,160)+'px';
         inp.selectionStart=inp.selectionEnd=inp.value.length;
+        // EntityBar search paneli açıksa kapat — chip ve # aynı sistem
+        if(window.EntityBar)EntityBar.closeSearch();
       });
       tag.addEventListener('contextmenu',e=>{
         e.preventDefault();
@@ -3494,18 +3497,30 @@ const EntityBar = {
 
   insert(name, e) {
     const typeKey = this._type;
-    const tag = `[${typeKey}:${name}]`;
     const inp = document.getElementById('msg-input');
     if (inp) {
-      const cur = inp.selectionStart || inp.value.length;
-      const before = inp.value.slice(0, cur);
-      const after = inp.value.slice(cur);
-      inp.value = before + (before && !before.endsWith(' ') ? ' ' : '') + tag + ' ' + after;
-      inp.focus();
-      const pos = before.length + (before && !before.endsWith(' ') ? 1 : 0) + tag.length + 1;
-      inp.setSelectionRange(pos, pos);
-      inp.style.height = 'auto';
-      inp.style.height = Math.min(inp.scrollHeight, 160) + 'px';
+      if (typeKey === 'Karakter') {
+        // Karakter seçince chip gibi bold prefix ekle — aynı sistem
+        const val = inp.value;
+        const prefix = `**${name}:** `;
+        inp.value = (val === '' || val.endsWith('\n')) ? val + prefix : val + '\n' + prefix;
+        inp.focus();
+        inp.style.height = 'auto';
+        inp.style.height = Math.min(inp.scrollHeight, 160) + 'px';
+        inp.selectionStart = inp.selectionEnd = inp.value.length;
+      } else {
+        // Diğer tipler → [Type:Name] etiketi ekle
+        const tag = `[${typeKey}:${name}]`;
+        const cur = inp.selectionStart || inp.value.length;
+        const before = inp.value.slice(0, cur);
+        const after = inp.value.slice(cur);
+        inp.value = before + (before && !before.endsWith(' ') ? ' ' : '') + tag + ' ' + after;
+        inp.focus();
+        const pos = before.length + (before && !before.endsWith(' ') ? 1 : 0) + tag.length + 1;
+        inp.setSelectionRange(pos, pos);
+        inp.style.height = 'auto';
+        inp.style.height = Math.min(inp.scrollHeight, 160) + 'px';
+      }
     }
     this.closeSearch();
   },
