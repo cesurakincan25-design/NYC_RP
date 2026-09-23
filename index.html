@@ -110,7 +110,22 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 .room-item.active .room-hash{color:var(--ac)}
 .room-name{font-size:13px;color:var(--t1);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .room-item.active .room-name{color:var(--t0)}
-.room-live{font-family:var(--mono);font-size:9px;color:var(--gn);border:1px solid var(--gn);padding:1px 5px;border-radius:2px}
+.room-live{font-family:var(--mono);font-size:9px;color:var(--rd);animation:livePulse 1.4s ease-in-out infinite}
+@keyframes livePulse{0%,100%{opacity:1}50%{opacity:.4}}
+.room-type-badge{font-size:13px;flex-shrink:0;line-height:1}
+/* oda tipi seçici */
+.room-type-opt{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--ln2);border-radius:8px;cursor:pointer;transition:border-color .15s,background .15s;user-select:none}
+.room-type-opt:has(input:checked){border-color:var(--ac);background:var(--ac-d)}
+.room-type-opt input{display:none}
+.rto-icon{font-size:16px;width:20px;text-align:center;flex-shrink:0}
+.rto-label{display:flex;flex-direction:column;gap:1px}
+.rto-label b{font-size:12px;font-weight:600;color:var(--t0)}
+.rto-label small{font-size:10px;color:var(--t2)}
+/* @mention vurgu */
+.mention-tag{display:inline-flex;align-items:center;background:rgba(74,143,226,.18);color:#7bb3f0;border-radius:4px;padding:0 4px;font-weight:600;font-size:.95em;cursor:pointer;transition:background .12s}
+.mention-tag:hover{background:rgba(74,143,226,.32)}
+.mention-tag.mention-everyone{background:rgba(232,167,74,.18);color:#e8a74a}
+.msg-row.mentioned{background:rgba(232,167,74,.07);border-left:2px solid #e8a74a;margin-left:-2px;padding-left:2px}
 .btn-icon{width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:var(--t3);cursor:pointer;border-radius:var(--r);font-size:13px;border:none;background:none;transition:color var(--tr),background var(--tr)}
 .btn-icon:hover{color:var(--t0);background:var(--bg4)}
 #sb-footer{border-top:1px solid var(--ln);padding:10px 14px;flex-shrink:0}
@@ -727,6 +742,35 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
   <div class="mbdy">
     <div class="ff"><label class="fl">Oda Adı</label><input type="text" id="new-room-name" class="fi-inp" placeholder="rp-downtown" maxlength="40"></div>
     <div class="ff"><label class="fl">Açıklama</label><input type="text" id="new-room-desc" class="fi-inp" placeholder="Burada ne oluyor?" maxlength="120"></div>
+    <div class="ff"><label class="fl">Oda Tipi</label>
+      <div id="room-type-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">
+        <label class="room-type-opt" data-type="live">
+          <input type="radio" name="room-type" value="live">
+          <span class="rto-icon" style="color:#e05555">●</span>
+          <span class="rto-label"><b>Live</b><small>Canlı RP — Timer aktif</small></span>
+        </label>
+        <label class="room-type-opt" data-type="ic">
+          <input type="radio" name="room-type" value="ic" checked>
+          <span class="rto-icon">🎭</span>
+          <span class="rto-label"><b>IC</b><small>Rol — bağımsız zaman</small></span>
+        </label>
+        <label class="room-type-opt" data-type="ooc">
+          <input type="radio" name="room-type" value="ooc">
+          <span class="rto-icon">💬</span>
+          <span class="rto-label"><b>OOC</b><small>Sohbet / not</small></span>
+        </label>
+        <label class="room-type-opt" data-type="private">
+          <input type="radio" name="room-type" value="private">
+          <span class="rto-icon">🔒</span>
+          <span class="rto-label"><b>Özel</b><small>Sadece sana görünür</small></span>
+        </label>
+        <label class="room-type-opt" data-type="announcement" style="grid-column:1/-1">
+          <input type="radio" name="room-type" value="announcement">
+          <span class="rto-icon">📢</span>
+          <span class="rto-label"><b>Duyuru</b><small>Platform / RP güncellemeleri</small></span>
+        </label>
+      </div>
+    </div>
   </div>
   <div class="mft"><button class="btn btn-g" onclick="CM('m-room')">İptal</button><button class="btn btn-p" onclick="RP.createRoom()"><i class="fas fa-plus"></i> Oluştur</button></div>
 </div></div>
@@ -1268,6 +1312,17 @@ const RP={
           setTimeout(()=>MasterAgent._autoReact(pl), 1200);
         }
       }
+      // @mention bildirimi — etiketlenen oyuncuları bul ve toast'a yansıt
+      const mentionMatches=txt.match(/@([A-Za-zÇĞİÖŞÜçğışöü][A-Za-zÇĞİÖŞÜçğışöü\s]{0,20}?)(?=\s|$)/g)||[];
+      if(mentionMatches.length){
+        const names=mentionMatches.map(m=>m.trim());
+        const uniqueNames=[...new Set(names)];
+        if(uniqueNames.includes('@everyone')||uniqueNames.includes('@here')){
+          toast('📢 Herkese mention gönderildi','');
+        } else {
+          toast(`📌 ${uniqueNames.join(', ')} etiketlendi`,'');
+        }
+      }
     }catch(e){toast('Gönderilemedi','error');}
   },
   async editMsg(id,newTxt,newRpTime){
@@ -1396,12 +1451,29 @@ const RP={
     const name=document.getElementById('new-room-name').value.trim().toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'');
     const desc=document.getElementById('new-room-desc').value.trim();
     if(!name){toast('Oda adı gerekli','error');return;}
-    const nr={slug:name,name,description:desc,sort_order:S.rooms.length,is_live:false,is_archived:false};
+    const typeVal=(document.querySelector('input[name="room-type"]:checked')||{}).value||'ic';
+    const nr={
+      slug:name,name,description:desc,sort_order:S.rooms.length,
+      is_live:typeVal==='live',
+      is_ic:typeVal==='ic',
+      is_ooc:typeVal==='ooc',
+      is_private:typeVal==='private',
+      is_announcement:typeVal==='announcement',
+      room_type:typeVal,
+      is_archived:false,
+      created_by:S.user?.id||null
+    };
+    // Özel oda: sadece kendi kullanıcısı görebilir
     if(!S._off){
       try{const r=await DB.post('rp_rooms',nr);S.rooms.push(r[0]||{...nr,id:'l'+Date.now()});}
       catch(e){toast('Oluşturulamadı','error');return;}
     }else S.rooms.push({...nr,id:'l'+Date.now(),created_at:new Date().toISOString()});
-    CM('m-room');document.getElementById('new-room-name').value='';document.getElementById('new-room-desc').value='';
+    CM('m-room');
+    document.getElementById('new-room-name').value='';
+    document.getElementById('new-room-desc').value='';
+    // Tipi ic'ye geri döndür
+    const icRadio=document.querySelector('input[name="room-type"][value="ic"]');
+    if(icRadio)icRadio.checked=true;
     UI.renderRooms();RP.switchRoom(S.rooms.filter(r=>!r.is_archived)[S.rooms.filter(r=>!r.is_archived).length-1].id);
   },
 
@@ -1931,9 +2003,12 @@ const UI={
     const el=document.createElement('div');
     el.className='room-item'+(room.id==S.roomId?' active':'')+(isArchived?' archived-room':'');
     el.dataset.id=room.id;
-    el.innerHTML=`<span class="room-hash">${isArchived?'🗄':'#'}</span>
+    const rtype=room.room_type||( room.is_live?'live': room.is_ooc?'ooc': room.is_announcement?'announcement': room.is_private?'private':'ic');
+    const rtIcon=isArchived?'🗄':{live:'●',ic:'🎭',ooc:'💬',private:'🔒',announcement:'📢'}[rtype]||'#';
+    const rtColor=rtype==='live'?'color:var(--rd)':'';
+    el.innerHTML=`<span class="room-type-badge" style="${rtColor}">${rtIcon}</span>
       <span class="room-name" style="${isArchived?'color:var(--t3)':''}">${room.name}</span>
-      ${room.is_live?'<span class="room-live">LIVE</span>':''}`;
+      ${rtype==='live'?'<span class="room-live">LIVE</span>':''}`;
     el.onclick=()=>{RP.switchRoom(room.id);document.getElementById('sidebar').classList.remove('open');document.getElementById('sb-overlay').classList.remove('show');};
     // Right-click context menu
     el.addEventListener('contextmenu',e=>{
@@ -2025,6 +2100,15 @@ const UI={
         `oncontextmenu="event.preventDefault();UI.charContextMenu(event,'${char?.id||''}','${name.trim().replace(/'/g,"\\'")}')">`+
         `${name}:</span> `;
     });
+    /* @mention ve @everyone */
+    t=t.replace(/@(everyone|here)/g,'<span class="mention-tag mention-everyone">@$1</span>');
+    t=t.replace(/@([A-Za-zÇĞİÖŞÜçğışöü][A-Za-zÇĞİÖŞÜçğışöü\s]{0,20}?)(?=\s|<|$)/g,(full,name)=>{
+      const lname=name.trim().toLowerCase();
+      // Oyuncu listesinde var mı?
+      const player=S.players?.find(p=>p.name?.toLowerCase()===lname||p.username?.toLowerCase()===lname||p.display?.toLowerCase()===lname);
+      if(!player&&lname!=='everyone'&&lname!=='here')return full;
+      return `<span class="mention-tag" onclick="void 0">@${name.trim()}</span>`;
+    });
     return t.replace(/\n/g,'<br>');
   },
 
@@ -2100,8 +2184,14 @@ const UI={
       pAvaHtml=`<div class="msg-player-ava" style="background:${playerColor}22;border-color:${playerColor}44;color:${playerColor}">${playerIni}</div>`;
     }
 
+    // @mention tespiti — beni mi etiketlediler?
+    const myName=S.user?.name||S.user?.id||'';
+    const isMentioned=myName&&msg.content&&msg.sent_by_user!==S.user?.id&&(
+      msg.content.toLowerCase().includes('@'+myName.toLowerCase())||
+      msg.content.includes('@everyone')||msg.content.includes('@here')
+    );
     const el=document.createElement('div');
-    el.className='msg-group'+(ns?' new-sender':'')+(isFav?' fav':'');
+    el.className='msg-group'+(ns?' new-sender':'')+(isFav?' fav':'')+(isMentioned?' mentioned':'');
     el.dataset.msgId=msg.id;
     el.dataset.charId=String(msg.char_id||'');
     el.dataset.userId=thisUser;
@@ -3298,6 +3388,24 @@ const Autocomplete = {
     const cur = inp.selectionStart;
     const before = val.slice(0, cur);
 
+    // --- Mod 0: @mention — oyuncu etiketleme ---
+    const mentionM = before.match(/@([A-Za-zÇĞİÖŞÜçğışöü]*)$/);
+    if (mentionM) {
+      const q = mentionM[1].toLowerCase();
+      this._triggerStart = before.length - mentionM[0].length;
+      // Oyuncu listesi: USERS + @everyone/@here
+      const players = (typeof USERS !== 'undefined' ? USERS : (S.players||[]));
+      const specials = [{name:'everyone', sub:'Herkesi etiketle', id:'everyone'},{name:'here', sub:'Aktif oyuncuları etiketle', id:'here'}];
+      const all = [...specials, ...players.map(u=>({name:u.name||u.username||u.id, sub:u.display||'', id:u.id}))];
+      const hits = all.filter(p => !q || p.name.toLowerCase().startsWith(q)).slice(0,8);
+      if (!hits.length) { this.hide(); return; }
+      this._items = hits.map(p => ({
+        text: p.name, sub: p.sub, icon: 'at', color: '#4a8fe2',
+        insert: `@${p.name}`,
+      }));
+      this._sel = 0; this._render(inp); return;
+    }
+
     // --- Mod 1: [Tip:isim] formatı hâlâ destekleniyor ---
     const bracketM = before.match(/\[([A-Za-zÇĞİÖŞÜçğışöü]*)(?::([^[\]]*))?$/);
     if (bracketM) {
@@ -3405,7 +3513,9 @@ const Autocomplete = {
     const cur = this._inp.selectionStart;
     const before = val.slice(0, cur);
     const after  = val.slice(cur);
-    const newBefore = before.slice(0, this._triggerStart) + it.insert;
+    // @mention → boşlukla bitir
+    const insertStr = it.insert.startsWith('@') ? it.insert + ' ' : it.insert;
+    const newBefore = before.slice(0, this._triggerStart) + insertStr;
     this._inp.value = newBefore + after;
     const newCur = newBefore.length;
     this._inp.setSelectionRange(newCur, newCur);
