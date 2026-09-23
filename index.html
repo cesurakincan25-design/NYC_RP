@@ -2223,14 +2223,18 @@ const Adm={
         el.innerHTML=`<span class="ck">${key.replace(/_/g,' ')}</span><div class="toggle ${on?'on':''}" data-key="${key}" onclick="Adm.toggleCfg(this)"></div>`;
         tEl.appendChild(el);
       });
+      // String fields — with confirm button, show current value
       STR_KEYS.forEach(key=>{
-        const el=document.createElement('div');el.className='cr';
-        el.innerHTML=`<span class="ck">${key.replace(/_/g,' ')}</span><input class="cfg-inp" data-key="${key}" value="${cfg[key]||''}" onblur="Adm.saveCfgVal(this)" style="font-family:var(--mono);font-size:11px;background:var(--bg3);border:1px solid var(--ln);border-radius:3px;color:var(--t0);padding:3px 6px;width:160px">`;
+        const cur=cfg[key]||'';
+        const el=document.createElement('div');el.className='cr';el.style.flexWrap='wrap';el.style.gap='6px';
+        el.innerHTML=`<span class="ck">${key.replace(/_/g,' ')}</span><div style="display:flex;gap:6px;align-items:center"><input class="cfg-inp" data-key="${key}" data-orig="${cur}" value="${cur}" style="font-family:var(--mono);font-size:11px;background:var(--bg3);border:1px solid var(--ln);border-radius:3px;color:var(--t0);padding:3px 8px;width:170px" oninput="Adm._cfgDirty(this)"><button class="cfg-save-btn" data-key="${key}" onclick="Adm.saveCfgVal(this.previousElementSibling)" disabled style="font-family:var(--mono);font-size:10px;padding:3px 8px;border-radius:3px;border:none;background:var(--ac);color:#fff;cursor:pointer;opacity:.4">Kaydet</button><button onclick="Adm._cfgReset(this)" style="font-family:var(--mono);font-size:10px;padding:3px 6px;border-radius:3px;border:1px solid var(--ln);background:transparent;color:var(--t2);cursor:pointer">↺</button></div>`;
         vEl.appendChild(el);
       });
+      // Number fields — with confirm button
       NUM_KEYS.forEach(key=>{
+        const cur=cfg[key]??'';
         const el=document.createElement('div');el.className='cr';
-        el.innerHTML=`<span class="ck">${key.replace(/_/g,' ')}</span><input class="cfg-inp" type="number" data-key="${key}" value="${cfg[key]??''}" onblur="Adm.saveCfgVal(this)" style="font-family:var(--mono);font-size:11px;background:var(--bg3);border:1px solid var(--ln);border-radius:3px;color:var(--t0);padding:3px 6px;width:90px">`;
+        el.innerHTML=`<span class="ck">${key.replace(/_/g,' ')}</span><div style="display:flex;gap:6px;align-items:center"><input class="cfg-inp" type="number" data-key="${key}" data-orig="${cur}" value="${cur}" style="font-family:var(--mono);font-size:11px;background:var(--bg3);border:1px solid var(--ln);border-radius:3px;color:var(--t0);padding:3px 8px;width:100px" oninput="Adm._cfgDirty(this)"><button class="cfg-save-btn" data-key="${key}" onclick="Adm.saveCfgVal(this.previousElementSibling)" disabled style="font-family:var(--mono);font-size:10px;padding:3px 8px;border-radius:3px;border:none;background:var(--ac);color:#fff;cursor:pointer;opacity:.4">Kaydet</button><button onclick="Adm._cfgReset(this)" style="font-family:var(--mono);font-size:10px;padding:3px 6px;border-radius:3px;border:1px solid var(--ln);background:transparent;color:var(--t2);cursor:pointer">↺</button></div>`;
         vEl.appendChild(el);
       });
     }catch(e){document.getElementById('cfg-toggles').innerHTML='<div style="padding:12px;font-family:var(--mono);font-size:11px;color:var(--t3)">Config yüklenemedi: '+e.message+'</div>';}
@@ -2253,17 +2257,49 @@ const Adm={
       if(m[key])m[key](nv);
     }catch(e){el.classList.toggle('on');toast('Güncelleme başarısız','error');}
   },
+  // Input değişince "Kaydet" butonunu aktif et
+  _cfgDirty(inp){
+    const btn=inp.nextElementSibling;
+    if(!btn)return;
+    const changed=inp.value!==inp.dataset.orig;
+    btn.disabled=!changed;btn.style.opacity=changed?'1':'0.4';
+    inp.style.borderColor=changed?'var(--am)':'var(--ln)';
+  },
+  // ↺ Reset — orijinal değere dön
+  _cfgReset(resetBtn){
+    const inp=resetBtn.previousElementSibling.previousElementSibling;
+    inp.value=inp.dataset.orig;
+    this._cfgDirty(inp);
+  },
+  // Kritik field'lar onay ister, diğerleri direkt kaydeder
   async saveCfgVal(inp){
     const key=inp.dataset.key,rawVal=inp.value.trim();
     const val=inp.type==='number'?parseFloat(rawVal):rawVal;
+    const orig=inp.dataset.orig;
+    // Onay gerektiren kritik fieldlar
+    const CRITICAL=['gemini_model'];
+    if(CRITICAL.includes(key)){
+      const label=key.replace(/_/g,' ');
+      if(!confirm(`⚠️ Kritik ayar değişikliği\n\n"${label}" şu an: ${orig}\nYeni değer: ${val}\n\nDevam edilsin mi?`)){
+        inp.value=orig;this._cfgDirty(inp);return;
+      }
+    }
+    const btn=inp.nextElementSibling;
+    if(btn){btn.disabled=true;btn.textContent='...';}
     try{
       const {db,fs}=await _fbReady();
       await fs.setDoc(fs.doc(db,'observer_config','main'),{[key]:val,updated_at:new Date().toISOString()},{merge:true});
-      toast(`${key.replace(/_/g,' ')} kaydedildi`,'success');
+      inp.dataset.orig=String(val);inp.style.borderColor='var(--gn)';
+      setTimeout(()=>{inp.style.borderColor='var(--ln)';},1500);
+      if(btn){btn.disabled=true;btn.textContent='Kaydet';btn.style.opacity='0.4';}
+      toast(`${key.replace(/_/g,' ')} → ${val}`,'success');
       if(key==='gemini_model'&&window.DM_CONFIG)window.DM_CONFIG.geminiModel=val;
       if(key==='min_confidence')OAI.CFG.MIN_CONFIDENCE=val;
       if(key==='read_interval')OAI.CFG.READ_INTERVAL=val;
-    }catch(e){toast('Kaydedilemedi: '+e.message,'error');}
+    }catch(e){
+      if(btn){btn.disabled=false;btn.textContent='Kaydet';btn.style.opacity='1';}
+      toast('Kaydedilemedi: '+e.message,'error');
+    }
   },
   async refreshFeed(){
     try{
