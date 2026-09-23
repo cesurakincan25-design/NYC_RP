@@ -5986,6 +5986,14 @@ const Session = {
     const rpTimeNow = S.roomId ? RpTime.get(S.roomId) : '—';
     const setupPrompt = `Yeni bir RP sessionu başlatılıyor. Aşağıdaki formatta bir Setup mesajı yaz ve SEND_MSG komutuyla RP odasına gönder.\n\nKural: Setup sadece atmosfer ve ortam betimler — olay, aksiyon veya karakter aksiyonu OLMAZ. Sinematik, doğal, 1–2 paragraf.\n\nFormat:\n# New York City Setup\n\n**New York City 🗽, NY, USA 🇺🇸 — ${rpTimeNow}**\n\n[Mevcut RP saatine ve mevsime göre şehrin atmosferini, sokaklarını, trafiğini, insan kalabalığını betimle. Her seferinde özgün detaylar kullan.]\n\nSadece bu formatı kullan. Başka açıklama ekleme.`;
     MASidebar.quick(setupPrompt);
+    // Observer AI — session-only modda başlat (gerçek zamanlı okuma yok, sadece session sonu çalışır)
+    if(window.OAI && !OAI.running) {
+      OAI._sessionOnlyMode = true;
+      OAI.start();
+      document.getElementById('obs-start')?.style && (document.getElementById('obs-start').style.display='none');
+      document.getElementById('obs-session-start')?.style && (document.getElementById('obs-session-start').style.display='none');
+      document.getElementById('obs-stop')?.style && (document.getElementById('obs-stop').style.display='');
+    }
     this._updateBtn();
     toast('🎬 Session başlatılıyor…', 'info');
   },
@@ -6016,6 +6024,14 @@ const Session = {
       } catch(e) { console.error('[Session] OAI error', e); SessionProgress.hide(); }
     }
     await this._saveBackup(roomId, reason);
+    // Observer AI — session bitti, durdur
+    if(window.OAI && OAI.running) {
+      OAI._sessionOnlyMode = false;
+      OAI.stop();
+      document.getElementById('obs-start')?.style && (document.getElementById('obs-start').style.display='');
+      document.getElementById('obs-session-start')?.style && (document.getElementById('obs-session-start').style.display='');
+      document.getElementById('obs-stop')?.style && (document.getElementById('obs-stop').style.display='none');
+    }
     if (window.MasterAgent) {
       MasterAgent._history.push({role:'user', parts:[{text:'[SYSTEM] Session kapatıldı. Neden: ' + reason}]});
       MasterAgent._history.push({role:'model', parts:[{text:'[Session kapandı, hazırım.]'}]});
