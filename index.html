@@ -6338,41 +6338,33 @@ const MasterAgent = {
     const charName = sentMsg.char_name || '?';
     const content  = sentMsg.content  || '';
 
-    // Son MA mesajından bu yana son 6 mesajı al — context için
-    const roomMsgs = (S?.msgs?.[S?.roomId] || []);
-    const recentMsgs = roomMsgs.slice(-8);
     // MA'nın bu sahnede oynadığı son karakteri bul
+    const roomMsgs = (S?.msgs?.[S?.roomId] || []);
     const lastMAMsg = [...roomMsgs].reverse().find(m => (m.char_name||'').toLowerCase().includes('master agent'));
-    const maCurrentChar = lastMAMsg ? (lastMAMsg.char_alias || lastMAMsg.char_name || 'bilinmiyor') : 'bilinmiyor';
-    const maCharOrg = lastMAMsg?.org_name ? ` (${lastMAMsg.org_name})` : '';
+    const maCurrentChar = lastMAMsg ? (lastMAMsg.char_alias || lastMAMsg.char_name || null) : null;
+    const maCurrentCharId = lastMAMsg?.char_id || null;
 
-    // Son mesajları formatla
-    const ctxLines = recentMsgs.map(m => {
-      const who = m.char_alias || m.char_name || '?';
-      const isMA = (m.char_name||'').toLowerCase().includes('master agent');
-      const prefix = isMA ? `[MA → ${who}]` : `[${who}]`;
-      return `${prefix}: ${(m.content||'').slice(0, 150)}`;
-    }).join('\n');
+    // Bu karakter için kayıtlı direktif var mı? (MAPanel karakter sohbetinden)
+    let charDirective = '';
+    if (window.MAPanel) {
+      const key = maCurrentCharId || maCurrentChar;
+      const cd = key ? MAPanel._getCharDirective(key) : null;
+      if (cd) charDirective = `\n\n[KARAKTER TALİMATI — ${maCurrentChar}: ${cd}]`;
+    }
 
-    // Build context-aware auto-prompt
+    // MA'ya gönder: kendi conversation history'si zaten var,
+    // sadece hangi karakter olduğunu hatırlat ve oyuncunun mesajını ilet
     const autoPrompt = [
-      `[OTO-DEVAM] Şu an ${maCurrentChar}${maCharOrg} karakterini oynuyorsun.`,
-      '',
-      'Son mesajlar (sahne bağlamı):',
-      ctxLines,
-      '',
-      `Şimdi ${charName} şunu yaptı/söyledi: "${content.slice(0,200)}"`,
-      '',
-      'Kurallar:',
-      `- ${maCurrentChar} olarak sahneyi devam ettir — başka karakter oynama, karakterini değiştirme.`,
-      '- Mesajını SEND_MSG komutuyla doğrudan odaya gönder.',
-      '- Tek bir doğal tepki yeterli — sahneyi fazla uzatma.',
-      '- Eğer sahne tamamsa veya tepki gerekmiyorsa sadece "Bekliyorum." yaz.',
-    ].join('\n');
+      `[OTO-DEVAM]`,
+      maCurrentChar ? `Sen hâlâ ${maCurrentChar} karakterisin — karakter değiştirme.` : '',
+      `${charName} şunu yaptı/söyledi: "${content.slice(0,250)}"`,
+      charDirective,
+      ``,
+      `Sahneyi ${maCurrentChar || 'mevcut karakterin'} olarak devam ettir. SEND_MSG kullan. Tek bir doğal tepki yeter — sahneyi uzatma. Sahne tamamsa sadece "Bekliyorum." yaz.`,
+    ].filter(l => l !== undefined).join('\n');
 
     try {
-      const reply = await this.send(autoPrompt, { silent: true });
-      // Sync to sidebar so user can see MA acted
+      await this.send(autoPrompt, { silent: true });
       if (window.MASidebar) MASidebar._syncLastReply();
     } catch(e) {
       console.warn('[MA Auto] Error:', e.message);
@@ -6815,6 +6807,93 @@ window.MASidebar = MASidebar;
 const MAPanel = {
   _chars: [], // { char_id, char_name, char_alias, org_name, msg_count, last_at, saved? }
   _LS_KEY: 'ma_played_chars',
+  _directives: {}, // charKey → directive string (persisted to localStorage)
+  _DIR_KEY: 'ma_char_directives',
+  _activeChat: null, // şu an açık olan karakter sohbeti key'i
+
+  _loadDirectives() {
+    try { this._directives = JSON.parse(localStorage.getItem(this._DIR_KEY) || '{}'); } catch(_) {}
+  },
+  _saveDirectives() {
+    try { localStorage.setItem(this._DIR_KEY, JSON.stringify(this._directives)); } catch(_) {}
+  },
+  _getCharDirective(key) {
+    if (!this._directives) this._loadDirectives();
+    return this._directives[String(key)] || '';
+  },
+  _setCharDirective(key, text) {
+    if (!this._directives) this._loadDirectives();
+    this._directives[String(key)] = text;
+    this._saveDirectives();
+  },
+
+  // Karakter sohbet penceresini aç
+  openCharChat(idx) {
+    const c = this._chars[idx];
+    if (!c) return;
+    const key = c.char_id || c.char_name;
+    this._activeChat = { idx, key, char: c };
+    this._renderCharChat();
+  },
+
+  _renderCharChat() {
+    const { idx, key, char: c } = this._activeChat;
+    const el = document.getElementById('ma-char-list');
+    if (!el) return;
+    const directive = this._getCharDirective(key) || '';
+    el.innerHTML = `
+      <div style="padding:10px 12px;border-bottom:1px solid var(--ln);display:flex;align-items:center;gap:8px">
+        <button onclick="MAPanel._closeCharChat()" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:2px 6px"><i class="fas fa-arrow-left"></i></button>
+        <div style="width:26px;height:26px;border-radius:50%;background:rgba(155,111,212,.25);border:1px solid rgba(155,111,212,.4);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--pu)">${(c.char_name||'?')[0].toUpperCase()}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;font-weight:600;color:var(--t1)">${c.char_name}${c.char_alias ? ` <span style="color:var(--t3);font-weight:400">"${c.char_alias}"</span>` : ''}</div>
+          ${c.org_name ? `<div style="font-size:9px;color:var(--t3)">${c.org_name}</div>` : ''}
+        </div>
+      </div>
+      <div style="padding:10px 12px">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:6px;font-weight:600">KARAKTER TALİMATI</div>
+        <div style="font-size:10px;color:var(--t3);margin-bottom:8px;line-height:1.4">
+          MA bu karakteri otomatik devam ettirirken bu talimatı baz alır.<br>
+          <em>Örn: "Soğukkanlı, az konuşur. Asla isim vermez. Silahlı."</em>
+        </div>
+        <textarea id="ma-char-directive-inp"
+          placeholder="Bu karakteri nasıl oynamasını istiyorsun?"
+          style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--ln);border-radius:6px;color:var(--t1);font-size:11px;font-family:var(--sans);padding:8px 10px;resize:vertical;min-height:80px;box-sizing:border-box;outline:none"
+          onkeydown="if(event.key==='Enter'&&event.ctrlKey){MAPanel._saveDirectiveAndSend();event.preventDefault()}"
+        >${directive}</textarea>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button onclick="MAPanel._saveDirective()" style="flex:1;padding:5px;background:rgba(155,111,212,.15);border:1px solid rgba(155,111,212,.4);color:var(--pu);border-radius:5px;cursor:pointer;font-size:10px;font-family:var(--sans)">💾 Kaydet</button>
+          <button onclick="MAPanel._saveDirectiveAndSend()" style="flex:1;padding:5px;background:rgba(155,111,212,.3);border:1px solid rgba(155,111,212,.6);color:var(--pu);border-radius:5px;cursor:pointer;font-size:10px;font-family:var(--sans);font-weight:600">💬 Kaydet & MA'ya Söyle</button>
+        </div>
+        ${c.saved ? '' : `<button onclick="event.stopPropagation();MAPanel.saveCharToDB(${idx})" style="width:100%;margin-top:8px;padding:5px;background:rgba(77,184,128,.12);border:1px solid rgba(77,184,128,.3);color:var(--gn);border-radius:5px;cursor:pointer;font-size:10px;font-family:var(--sans)">💾 NYC_DB'ye NPC Olarak Kaydet</button>`}
+      </div>
+    `;
+  },
+
+  _closeCharChat() {
+    this._activeChat = null;
+    this._render();
+  },
+
+  _saveDirective() {
+    if (!this._activeChat) return;
+    const inp = document.getElementById('ma-char-directive-inp');
+    if (!inp) return;
+    this._setCharDirective(this._activeChat.key, inp.value.trim());
+    toast('Karakter talimatı kaydedildi', 'ok');
+  },
+
+  _saveDirectiveAndSend() {
+    if (!this._activeChat) return;
+    const inp = document.getElementById('ma-char-directive-inp');
+    if (!inp) return;
+    const text = inp.value.trim();
+    this._setCharDirective(this._activeChat.key, text);
+    const c = this._activeChat.char;
+    const prompt = `[KARAKTER TANIMI — ${c.char_name}${c.char_alias ? ` (${c.char_alias})` : ''}]: ${text}\n\nBu karakteri bundan böyle bu şekilde oyna. Anladıysan kısa bir onay ver.`;
+    MasterAgent.send(prompt);
+    toast('Karakter talimatı kaydedildi & MA\'ya gönderildi', 'ok');
+  },
 
   _saveLS() {
     try { localStorage.setItem(this._LS_KEY, JSON.stringify(this._chars)); } catch(_) {}
@@ -6825,6 +6904,7 @@ const MAPanel = {
       const raw = localStorage.getItem(this._LS_KEY);
       if (raw) this._chars = JSON.parse(raw);
     } catch(_) {}
+    this._loadDirectives();
   },
 
   async loadMAChars() {
@@ -6883,17 +6963,19 @@ const MAPanel = {
       const alias = c.char_alias ? `<span style="color:var(--t3);font-size:9px"> "${c.char_alias}"</span>` : '';
       const org = c.org_name ? `<div style="font-size:9px;color:var(--t3);margin-top:1px"><i class="fas fa-building" style="font-size:8px"></i> ${c.org_name}</div>` : '';
       const count = `<span style="font-size:9px;color:var(--t3)">${c.msg_count} msg</span>`;
+      const hasDirective = !!(this._getCharDirective(c.char_id || c.char_name));
+      const chatBtn = `<button onclick="event.stopPropagation();MAPanel.openCharChat(${i})" title="Karakter talimatı & sohbet"
+          style="font-size:9px;padding:1px 5px;border:1px solid rgba(155,111,212,.4);border-radius:3px;background:${hasDirective ? 'rgba(155,111,212,.3)' : 'rgba(155,111,212,.08)'};color:var(--pu);cursor:pointer;margin-left:2px;line-height:1.4">💬${hasDirective ? '✓' : ''}</button>`;
       const saveBtn = c.saved
         ? `<span style="font-size:9px;color:var(--gn);margin-left:2px" title="NYC_DB'ye kaydedildi"><i class="fas fa-check-circle"></i></span>`
-        : `<button onclick="event.stopPropagation();MAPanel.saveCharToDB(${i})" title="NYC_DB'ye NPC olarak kaydet"
-            style="font-size:9px;padding:1px 5px;border:1px solid rgba(155,111,212,.4);border-radius:3px;background:rgba(155,111,212,.12);color:var(--pu);cursor:pointer;margin-left:2px;line-height:1.4">💾 Kaydet</button>`;
+        : '';
       return `<div class="npc-card" style="padding:8px 10px;display:flex;align-items:flex-start;gap:8px;border-bottom:1px solid var(--ln);cursor:pointer"
-        onclick="MAPanel.playAs(${JSON.stringify(c.char_id||c.char_name)}, ${JSON.stringify(c.char_name)})">
+        onclick="MAPanel.openCharChat(${i})">
         <div style="width:28px;height:28px;border-radius:50%;background:rgba(155,111,212,.25);border:1px solid rgba(155,111,212,.4);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--pu);flex-shrink:0">${initial}</div>
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
             <span style="font-size:11px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.char_name}</span>${alias}
-            <span style="margin-left:auto;display:flex;align-items:center;gap:4px">${count}${saveBtn}</span>
+            <span style="margin-left:auto;display:flex;align-items:center;gap:4px">${count}${chatBtn}${saveBtn}</span>
           </div>
           ${org}
         </div>
