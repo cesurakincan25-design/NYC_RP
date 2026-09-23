@@ -276,6 +276,39 @@ const DMContext = {
         DM._msgsSinceRead = 0;
       }
     } catch (e) { /* first run */ }
+
+    // Observer AI özetlerini de yükle (Supabase)
+    await this._loadObserverSummaries();
+  },
+
+  async _loadObserverSummaries() {
+    try {
+      const cfg = window.DM_CONFIG;
+      if (!cfg?.supaUrl || !cfg?.supaKey) return;
+      const res = await fetch(
+        `${cfg.supaUrl}/rest/v1/ai_summaries?summary_type=eq.rp_session&order=created_at.desc&limit=3&select=title,content,created_at`,
+        { headers: { apikey: cfg.supaKey, Authorization: `Bearer ${cfg.supaKey}` } }
+      );
+      if (!res.ok) return;
+      const rows = await res.json();
+      if (!rows?.length) return;
+      // Observer özetlerini context window başına ekle (tekrar ekleme önlemi)
+      const existing = new Set(this._window.map(e => e.summary?.slice(0,40)));
+      for (const r of rows) {
+        const preview = (r.content || '').slice(0, 40);
+        if (existing.has(preview)) continue;
+        this._window.push({
+          summary:    `[Observer Özeti] ${r.title}\n${r.content}`,
+          msg_count:  0,
+          reason:     'observer_ai',
+          created_at: r.created_at,
+        });
+      }
+      if (this._window.length > this.MAX_ENTRIES + 3) {
+        this._window = this._window.slice(0, this.MAX_ENTRIES + 3);
+      }
+      console.log(`[DMContext] Observer'dan ${rows.length} özet yüklendi`);
+    } catch(e) { console.warn('[DMContext] Observer özetleri yüklenemedi:', e.message); }
   },
 
   async save() {
