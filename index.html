@@ -164,6 +164,10 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
 .msg-text{font-size:13.5px;color:var(--t1);line-height:1.6;word-break:break-word;white-space:pre-wrap}
 .emote{color:#c084fc;font-style:italic}
 .inline-tag{display:inline-flex;align-items:center;padding:1px 7px;border-radius:20px;font-size:11px;font-weight:600;font-family:var(--mono);cursor:pointer;transition:opacity .12s;white-space:nowrap;user-select:none}
+.tag-type-btn{padding:5px 10px;border-radius:20px;border:1px solid var(--ln2);background:none;color:var(--t3);font-size:11px;font-family:var(--sans);cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:5px}
+.tag-type-btn.active{background:rgba(124,77,255,.15)!important;border-color:rgba(124,77,255,.5)!important;color:var(--ac)!important}
+.tag-result-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:var(--bg4);cursor:pointer;border:1px solid transparent;transition:all .12s}
+.tag-result-row:hover{border-color:var(--ln2);background:var(--bg5)}
 .inline-tag:hover{opacity:.75}
 .speaker{font-weight:600;color:var(--t0)}
 .tag-badge{display:inline-flex;align-items:center;font-family:var(--mono);font-size:9px;font-weight:700;padding:1px 5px;border-radius:2px;background:rgba(74,143,226,.15);color:var(--ac);border:1px solid rgba(74,143,226,.3);letter-spacing:.06em;text-transform:uppercase;margin:0 2px;vertical-align:middle}
@@ -502,6 +506,7 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
         <button class="tb-btn" onclick="RP.toggleEmoji(event)"><i class="far fa-smile"></i></button>
         <button class="tb-btn" onclick="RP.promptAttach()"><i class="fas fa-image"></i></button>
         <button class="tb-btn" id="btn-rpt-override" title="RP Zamanı override" onclick="const b=document.getElementById('rp-time-override-bar');const shown=b.style.display==='flex';b.style.display=shown?'none':'flex';if(!shown){const st=RpTime._state[S.roomId];if(st)document.getElementById('rp-time-override-inp').placeholder=RpTime.fmt(st)+' (boş = otomatik)';document.getElementById('rp-time-override-inp').focus();}"><i class="fas fa-clock" style="color:var(--pu);opacity:.7"></i></button>
+        <button class="tb-btn" title="Etiket ekle" onclick="TagPicker.open()"><i class="fas fa-hashtag" style="color:var(--ac)"></i></button>
         <span class="tb-spc"></span>
         <button id="send-btn" onclick="RP.send()"><i class="fas fa-paper-plane"></i> SEND</button>
       </div>
@@ -658,6 +663,28 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
   <div class="mbdy"><div class="cpg" id="cpg"></div></div>
   <div class="mft" id="cpf"><button class="btn btn-g" onclick="CM('m-char-picker')">Kapat</button></div>
 </div></div>
+
+<!-- ═══ TAG PICKER MODAL ═══ -->
+<div class="mbd hidden" id="m-tag-picker">
+<div class="mbox" style="max-width:420px">
+  <div class="mhd"><span class="mti"><i class="fas fa-hashtag" style="color:var(--ac);margin-right:6px"></i>Etiket Ekle</span><button class="mcl" onclick="CM('m-tag-picker')"><i class="fas fa-times"></i></button></div>
+  <div class="mbdy" style="gap:10px">
+    <!-- Tip seçimi -->
+    <div style="display:flex;gap:6px;flex-wrap:wrap" id="tag-type-btns">
+      <button class="tag-type-btn active" data-type="Karakter" onclick="TagPicker.setType('Karakter',this)" style="background:rgba(192,132,252,.15);color:#c084fc;border-color:#c084fc44"><i class="fas fa-user"></i> Karakter</button>
+      <button class="tag-type-btn" data-type="Araç" onclick="TagPicker.setType('Araç',this)" style="color:#e8a74a;border-color:#e8a74a44"><i class="fas fa-car"></i> Araç</button>
+      <button class="tag-type-btn" data-type="Org" onclick="TagPicker.setType('Org',this)" style="color:#4a8fe2;border-color:#4a8fe244"><i class="fas fa-building"></i> Org</button>
+      <button class="tag-type-btn" data-type="Mülk" onclick="TagPicker.setType('Mülk',this)" style="color:#9b6fd4;border-color:#9b6fd444"><i class="fas fa-home"></i> Mülk</button>
+      <button class="tag-type-btn" data-type="Ekipman" onclick="TagPicker.setType('Ekipman',this)" style="color:#4db880;border-color:#4db88044"><i class="fas fa-box"></i> Ekipman</button>
+    </div>
+    <!-- Arama -->
+    <input type="text" class="fi-inp" id="tag-search-inp" placeholder="Ara..." oninput="TagPicker.search(this.value)" autocomplete="off">
+    <!-- Sonuçlar -->
+    <div id="tag-results" style="max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:4px"></div>
+  </div>
+  <div class="mft"><button class="btn btn-g" onclick="CM('m-tag-picker')">Kapat</button></div>
+</div>
+</div>
 
 <div class="mbd hidden" id="m-room">
 <div class="mbox">
@@ -3032,6 +3059,224 @@ const Adm={
     if(cls==='thinking')document.getElementById('tbar').classList.add('show');else document.getElementById('tbar').classList.remove('show');
   }
 };
+
+/* ═══ TAG PICKER (manuel etiket ekleme modalı) ════════════ */
+const TagPicker = {
+  _type: 'Karakter',
+  _TYPES: {
+    'Karakter': { icon:'user',     color:'#c084fc', src:()=>(S.chars||[]).map(c=>({id:c.id,name:c.name,sub:c.alias||c.occupation||'',img:c.image||''})) },
+    'Araç':     { icon:'car',      color:'#e8a74a', src:()=>(S._db?.vehicles||[]).map(v=>({id:v.id,name:v.name||v.model||v.plate,sub:v.plate||'',img:''})) },
+    'Org':      { icon:'building', color:'#4a8fe2', src:()=>(S.orgs||[]).map(o=>({id:o.id,name:o.name,sub:o.type||'',img:o.logo||''})) },
+    'Mülk':     { icon:'home',     color:'#9b6fd4', src:()=>(S._db?.properties||[]).map(p=>({id:p.id,name:p.name,sub:p.address||'',img:''})) },
+    'Ekipman':  { icon:'box',      color:'#4db880', src:()=>(S._db?.equipments||[]).map(q=>({id:q.id,name:q.name,sub:q.type||'',img:''})) },
+  },
+
+  open() {
+    OM('m-tag-picker');
+    this.setType(this._type, document.querySelector(`.tag-type-btn[data-type="${this._type}"]`));
+    setTimeout(()=>document.getElementById('tag-search-inp')?.focus(), 80);
+  },
+
+  setType(type, btn) {
+    this._type = type;
+    document.querySelectorAll('.tag-type-btn').forEach(b => {
+      const t = b.dataset.type;
+      const def = this._TYPES[t];
+      b.classList.remove('active');
+      b.style.background = '';
+    });
+    if (btn) {
+      btn.classList.add('active');
+      const def = this._TYPES[type];
+      btn.style.background = `${def.color}22`;
+      btn.style.borderColor = `${def.color}66`;
+      btn.style.color = def.color;
+    }
+    const inp = document.getElementById('tag-search-inp');
+    if (inp) { inp.value = ''; inp.placeholder = `${type} ara...`; }
+    this.search('');
+  },
+
+  search(q) {
+    const def = this._TYPES[this._type];
+    if (!def) return;
+    const list = def.src().filter(e => !q || e.name?.toLowerCase().includes(q.toLowerCase()) || e.sub?.toLowerCase().includes(q.toLowerCase())).slice(0, 20);
+    const el = document.getElementById('tag-results');
+    if (!el) return;
+    if (!list.length) {
+      el.innerHTML = `<div style="color:var(--t3);font-size:12px;text-align:center;padding:16px">Sonuç bulunamadı</div>`;
+      return;
+    }
+    el.innerHTML = list.map(e => {
+      const avatar = e.img
+        ? `<img src="${e.img}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;border:1px solid var(--ln2)" onerror="this.style.display='none'">`
+        : `<div style="width:32px;height:32px;border-radius:50%;background:${def.color}22;display:flex;align-items:center;justify-content:center;font-size:14px;color:${def.color}"><i class="fas fa-${def.icon}"></i></div>`;
+      return `<div class="tag-result-row" onclick="TagPicker.insert('${e.name.replace(/'/g,"\\'")}')">
+        ${avatar}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.name}</div>
+          ${e.sub ? `<div style="font-size:11px;color:var(--t3)">${e.sub}</div>` : ''}
+        </div>
+        <span style="font-size:10px;color:${def.color};font-family:var(--mono);opacity:.7">${this._type}</span>
+      </div>`;
+    }).join('');
+  },
+
+  insert(name) {
+    const tag = `[${this._type}:${name}]`;
+    const inp = document.getElementById('msg-input');
+    if (inp) {
+      const cur = inp.selectionStart || inp.value.length;
+      const before = inp.value.slice(0, cur);
+      const after  = inp.value.slice(cur);
+      inp.value = before + (before && !before.endsWith(' ') ? ' ' : '') + tag + (after && !after.startsWith(' ') ? ' ' : '') + after;
+      inp.focus();
+      const pos = before.length + (before && !before.endsWith(' ') ? 1 : 0) + tag.length + 1;
+      inp.setSelectionRange(pos, pos);
+      inp.style.height = 'auto';
+      inp.style.height = Math.min(inp.scrollHeight, 160) + 'px';
+    }
+    CM('m-tag-picker');
+  },
+};
+window.TagPicker = TagPicker;
+
+/* ═══ AUTOCOMPLETE (tag tamamlama) ═══════════════════════ */
+const Autocomplete = {
+  visible: false,
+  _items: [],
+  _sel: -1,
+  _el: null,
+  _inp: null,
+  _triggerStart: -1,
+
+  // Tag tipleri ve arama kaynakları
+  _TYPES: [
+    { label:'Karakter', key:'Karakter', icon:'user',     color:'#c084fc', src:()=>(S.chars||[]).map(c=>({name:c.name,sub:c.alias||'',id:c.id})) },
+    { label:'Araç',     key:'Araç',     icon:'car',      color:'#e8a74a', src:()=>(S._db?.vehicles||[]).map(v=>({name:v.name||v.model||v.plate,sub:v.plate||'',id:v.id})) },
+    { label:'Org',      key:'Org',      icon:'building', color:'#4a8fe2', src:()=>(S.orgs||[]).map(o=>({name:o.name,sub:o.type||'',id:o.id})) },
+    { label:'Mülk',     key:'Mülk',     icon:'home',     color:'#9b6fd4', src:()=>(S._db?.properties||[]).map(p=>({name:p.name,sub:p.address||'',id:p.id})) },
+    { label:'Ekipman',  key:'Ekipman',  icon:'box',      color:'#4db880', src:()=>(S._db?.equipments||[]).map(q=>({name:q.name,sub:q.type||'',id:q.id})) },
+  ],
+
+  check(inp) {
+    this._inp = inp;
+    const val = inp.value;
+    const cur = inp.selectionStart;
+    // Son [ karakterinden imlece kadar olan parça
+    const before = val.slice(0, cur);
+    const m = before.match(/\[([A-Za-zÇĞİÖŞÜçğışöü]*)(?::([^[\]]*))?$/);
+    if (!m) { this.hide(); return; }
+
+    const typePart = m[1] || '';    // "Araç" veya "Fer" vs.
+    const namePart = m[2];          // undefined = henüz : yok, string = sonrası
+
+    this._triggerStart = before.lastIndexOf('[');
+
+    if (namePart === undefined) {
+      // Henüz ":" yazılmamış — tip listesi göster
+      const filtered = this._TYPES.filter(t =>
+        !typePart || t.label.toLowerCase().startsWith(typePart.toLowerCase())
+      );
+      if (!filtered.length) { this.hide(); return; }
+      this._items = filtered.map(t => ({
+        text: t.label,
+        sub: '',
+        icon: t.icon,
+        color: t.color,
+        insert: `[${t.label}:`,
+        replaceLen: before.length - this._triggerStart,
+        moveCursorTo: null,
+      }));
+    } else {
+      // ":" var, tip belli — isim ara
+      const typeDef = this._TYPES.find(t => t.label.toLowerCase() === typePart.toLowerCase());
+      if (!typeDef) { this.hide(); return; }
+      const q = namePart.toLowerCase();
+      const results = typeDef.src()
+        .filter(e => e.name && e.name.toLowerCase().includes(q))
+        .slice(0, 8);
+      if (!results.length) { this.hide(); return; }
+      this._items = results.map(e => ({
+        text: e.name,
+        sub: e.sub,
+        icon: typeDef.icon,
+        color: typeDef.color,
+        insert: `[${typeDef.label}:${e.name}]`,
+        replaceLen: before.length - this._triggerStart,
+        moveCursorTo: null,
+      }));
+    }
+
+    this._sel = 0;
+    this._render(inp);
+  },
+
+  _render(inp) {
+    this.hide();
+    if (!this._items.length) return;
+    const rect = inp.getBoundingClientRect();
+    const el = document.createElement('div');
+    el.id = 'ac-popup';
+    el.style.cssText = `position:fixed;bottom:${window.innerHeight - rect.top + 6}px;left:${rect.left}px;min-width:240px;max-width:340px;background:var(--bg3);border:1px solid var(--ln2);border-radius:10px;padding:4px;z-index:9998;box-shadow:0 8px 32px #0009;max-height:280px;overflow-y:auto`;
+    this._items.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.dataset.idx = i;
+      row.style.cssText = `display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;transition:background .1s`;
+      row.style.background = i === this._sel ? 'var(--bg5)' : '';
+      row.innerHTML = `<i class="fas fa-${it.icon}" style="color:${it.color};width:14px;font-size:12px"></i><span style="font-size:13px;color:var(--t1);flex:1">${it.text}</span>${it.sub ? `<span style="font-size:11px;color:var(--t3)">${it.sub}</span>` : ''}`;
+      row.onmouseenter = () => { this._sel = i; this._highlight(); };
+      row.onmousedown = e => { e.preventDefault(); this._sel = i; this.confirm(); };
+      el.appendChild(row);
+    });
+    document.body.appendChild(el);
+    this._el = el;
+    this.visible = true;
+  },
+
+  _highlight() {
+    if (!this._el) return;
+    this._el.querySelectorAll('[data-idx]').forEach(row => {
+      row.style.background = Number(row.dataset.idx) === this._sel ? 'var(--bg5)' : '';
+    });
+  },
+
+  move(dir) {
+    this._sel = Math.max(0, Math.min(this._items.length - 1, this._sel + dir));
+    this._highlight();
+    // Scroll into view
+    this._el?.querySelector(`[data-idx="${this._sel}"]`)?.scrollIntoView({block:'nearest'});
+  },
+
+  confirm() {
+    if (!this._inp || this._sel < 0 || !this._items[this._sel]) return;
+    const it = this._items[this._sel];
+    const val = this._inp.value;
+    const cur = this._inp.selectionStart;
+    const before = val.slice(0, cur);
+    const after  = val.slice(cur);
+    const newBefore = before.slice(0, this._triggerStart) + it.insert;
+    this._inp.value = newBefore + after;
+    const newCur = newBefore.length;
+    this._inp.setSelectionRange(newCur, newCur);
+    this._inp.style.height = 'auto';
+    this._inp.style.height = Math.min(this._inp.scrollHeight, 160) + 'px';
+    this.hide();
+    // Eğer sadece tip seçildiyse (insert ile : bitti) → tekrar check et
+    if (it.insert.endsWith(':')) {
+      setTimeout(() => this.check(this._inp), 0);
+    }
+  },
+
+  hide() {
+    this._el?.remove();
+    this._el = null;
+    this.visible = false;
+    this._items = [];
+    this._sel = -1;
+  }
+};
+window.Autocomplete = Autocomplete;
 
 /* ═══ EVENT WIRING ═══════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded',()=>{
