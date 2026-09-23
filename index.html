@@ -4226,7 +4226,7 @@ const Autocomplete = {
       const q = mentionM[1].toLowerCase();
       this._triggerStart = before.length - mentionM[0].length;
       // Oyuncu listesi: USERS + @everyone/@here
-      const players = (typeof USERS !== 'undefined' ? USERS : (S.players||[]));
+      const players = (typeof USERS !== 'undefined' ? USERS : (S.players||[])).filter(u => !u.isMA);
       const maEntry = {name:'MA', sub:"Master Agent'a yönlendir", id:'__ma__', icon:'🤖'};
       const specials = [{name:'everyone', sub:'Herkesi etiketle', id:'everyone'},{name:'here', sub:'Aktif oyuncuları etiketle', id:'here'}];
       const all = [maEntry, ...specials, ...players.map(u=>({name:u.name||u.username||u.id, sub:u.display||'', id:u.id}))];
@@ -6150,6 +6150,7 @@ const MasterAgent = {
           if (!MasterAgent._sentIds) MasterAgent._sentIds = new Set();
           MasterAgent._sentIds.add(msgRef.id);
           MasterAgent._lastSentAt = Date.now(); // oto-devam penceresi başlat
+          try { localStorage.setItem('ma_lastSentAt', MasterAgent._lastSentAt); } catch(_) {}
           if (window.Session) Session.onMAMessage(msgRef.id);
           if (MasterAgent._sentIds.size > 50) {
             // Set'i küçük tut — en eski 25'i sil
@@ -6157,8 +6158,8 @@ const MasterAgent = {
             MasterAgent._sentIds = new Set(arr.slice(arr.length - 25));
           }
         }
-        // MA Panel karakter listesini güncelle
-        if (window.MAPanel) MAPanel.notifyNewMsg(params.char_id||null, charName, params.char_alias||null, params.org_name||null);
+        // MA Panel karakter listesini güncelle (charId kullan — doğru tip)
+        if (window.MAPanel) MAPanel.notifyNewMsg(charId, charName, charAlias||null, orgName||null);
         results.push(`✅ Mesaj gönderildi → [${charName}] "${params.content.slice(0, 60)}${params.content.length > 60 ? '…' : ''}"`);
       } catch(e) {
         results.push('❌ Mesaj gönderilemedi: ' + e.message);
@@ -6364,28 +6365,45 @@ const MasterAgent = {
     // MA mesajı mı? (char_name kontrolü — bu da sayılmaz)
     if ((msg.char_name || '').toLowerCase().includes('master agent')) return;
 
-    // MA'nın son mesajını bul: ya _lastSentAt (bu session'da gönderdi), ya da odadaki son MA mesajı
+    // MA'nın son mesajını bul: sırasıyla kontrol et
     let maRecentlySpoke = false;
-    if (this._lastSentAt > 0 && Date.now() - this._lastSentAt < this._autoWindow) {
+    const now = Date.now();
+    const win = this._autoWindow;
+
+    // 1) Bu session'da MA mesaj attı mı?
+    if (this._lastSentAt > 0 && now - this._lastSentAt < win) {
       maRecentlySpoke = true;
-    } else {
-      // Sayfa yenilendi — S.msgs içinde son 10 mesajda MA mesajı var mı?
+    }
+
+    // 2) localStorage'da kayıtlı son MA mesajı zamanı (sayfa refresh sonrası da çalışır)
+    if (!maRecentlySpoke) {
+      try {
+        const lsTime = parseInt(localStorage.getItem('ma_lastSentAt') || '0', 10);
+        if (lsTime > 0 && now - lsTime < win) {
+          maRecentlySpoke = true;
+          this._lastSentAt = lsTime; // sync
+        }
+      } catch(_) {}
+    }
+
+    // 3) S.msgs içinde son MA mesajını ara (fallback)
+    if (!maRecentlySpoke) {
       const roomMsgs = (S?.msgs?.[S?.roomId] || []);
-      const recent = roomMsgs.slice(-10);
-      const lastMAMsg = recent.reverse().find(m => (m.char_name || '').toLowerCase().includes('master agent'));
+      const recent = roomMsgs.slice(-15);
+      const lastMAMsg = [...recent].reverse().find(m => (m.char_name || '').toLowerCase().includes('master agent'));
       if (lastMAMsg) {
         const lastMATime = new Date(lastMAMsg.created_at).getTime();
-        if (Date.now() - lastMATime < this._autoWindow) {
+        if (now - lastMATime < win) {
           maRecentlySpoke = true;
-          // _lastSentAt'ı güncelle ki bir sonraki mesajda tekrar arama yapmayalım
           this._lastSentAt = lastMATime;
+          try { localStorage.setItem('ma_lastSentAt', lastMATime); } catch(_) {}
         }
       }
     }
 
     if (!maRecentlySpoke) return;
     // Cooldown kontrolü
-    if (Date.now() - this._lastAutoAt < this._autoCooldown) return;
+    if (now - this._lastAutoAt < this._autoCooldown) return;
     // Tetikle
     setTimeout(() => this._autoReact(msg), 1500);
   },
