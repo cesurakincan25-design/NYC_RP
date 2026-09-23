@@ -2804,7 +2804,7 @@ const CharCard = {
     <!-- Footer -->
     <div style="padding:10px 14px;border-top:1px solid var(--ln);display:flex;gap:6px;flex-shrink:0;background:var(--bg2)">
       <button onclick="CharCard.openInDB('${c.id}','character')" style="flex:1;padding:8px;background:var(--bg4);border:1px solid var(--ln2);color:var(--t1);border-radius:8px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:5px;transition:background .12s" onmouseenter="this.style.background='var(--bg5)'" onmouseleave="this.style.background='var(--bg4)'"><i class="fas fa-external-link-alt" style="font-size:10px"></i>DB'de Aç</button>
-      <button onclick="const inp=document.getElementById('msg-input');if(inp){inp.value+='**${c.name}:** ';inp.focus();}CharCard.hide();" style="flex:1;padding:8px;background:rgba(74,143,226,.15);border:1px solid rgba(74,143,226,.3);color:var(--ac);border-radius:8px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:5px" onmouseenter="this.style.opacity='.8'" onmouseleave="this.style.opacity='1'"><i class="fas fa-at" style="font-size:10px"></i>Mesaja Etiketle</button>
+      <button onclick="const inp=document.getElementById('msg-input');if(inp){inp.value+='[Karakter:${c.name}] ';inp.focus();}CharCard.hide();" style="flex:1;padding:8px;background:rgba(74,143,226,.15);border:1px solid rgba(74,143,226,.3);color:var(--ac);border-radius:8px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:5px" onmouseenter="this.style.opacity='.8'" onmouseleave="this.style.opacity='1'"><i class="fas fa-at" style="font-size:10px"></i>Mesaja Etiketle</button>
     </div>`;
   },
 
@@ -3996,10 +3996,8 @@ const QuickBar = {
         chip.addEventListener('click', () => {
           const inp = document.getElementById('msg-input');
           if (!inp) return;
-          if (item.type === 'Karakter') {
-            const val = inp.value;
-            const prefix = `**${item.name}:** `;
-            inp.value = (val === '' || val.endsWith('\n')) ? val + prefix : val + '\n' + prefix;
+          if (false) {
+            // (unused branch kept for structure)
           } else {
             const tag = `[${item.type}:${item.name}]`;
             const cur = inp.selectionStart || inp.value.length;
