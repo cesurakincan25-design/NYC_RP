@@ -44,6 +44,21 @@ const DMPanel = {
     document.getElementById('view-rp').classList.add('active');
   },
 
+  /* ─ Tab switching ────────────────────────────────────── */
+  switchTab(tab) {
+    const isPanel = tab === 'panel';
+    document.getElementById('dm-grid').style.display  = isPanel ? '' : 'none';
+    document.getElementById('dm-ma').style.display    = isPanel ? 'none' : 'flex';
+    document.getElementById('dm-tab-panel').classList.toggle('active', isPanel);
+    document.getElementById('dm-tab-ma').classList.toggle('active', !isPanel);
+    // Header controls relevant only to DM panel
+    const panelOnly = ['dm-read-btn','dm-auto-btn','dm-auto-interval'];
+    panelOnly.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = isPanel ? '' : 'none';
+    });
+  },
+
   async _initDM() {
     this._setStatus('thinking', 'Başlatılıyor…');
     try {
