@@ -3594,91 +3594,127 @@ const QuickBar = {
     this.render();
   },
 
+  // Aktif odanın son mesajlarından entity'leri çıkar
+  _fromMsgs() {
+    const msgs = (S.msgs[S.roomId] || []).slice(-60); // son 60 mesaj
+    const seen = new Map(); // key: "Tip|id_veya_ad" → {type,name,id,img}
+
+    // En yeni mesajlar önce gelsin diye tersine işle
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      // Mesajı gönderen karakter
+      if (m.char_name) {
+        const key = 'Karakter|' + (m.char_id || m.char_name);
+        if (!seen.has(key)) {
+          const charObj = S.ci?.get(m.char_id) || null;
+          seen.set(key, { type:'Karakter', name:m.char_name, id:m.char_id||m.char_name, img:charObj?.image||m.char_avatar||null });
+        }
+      }
+      // Content içindeki [Tip:Ad] etiketleri
+      const content = m.content || '';
+      const tagRe = /\[(Karakter|Araç|Mülk|Org|Ekipman):([^\]]+)\]/g;
+      let match;
+      while ((match = tagRe.exec(content)) !== null) {
+        const [, typ, nam] = match;
+        const key = typ + '|' + nam;
+        if (!seen.has(key)) {
+          seen.set(key, { type:typ, name:nam, id:nam, img:null });
+        }
+      }
+      if (seen.size >= 12) break; // yeterli
+    }
+    return [...seen.values()];
+  },
+
   // Şeridi render et
   render() {
     const bar = document.getElementById('quick-entity-bar');
     if (!bar) return;
 
+    // ── Bölüm 1: Son kullanılanlar (localStorage) ──────────
     const recent = this._getRecent();
+    const usedKeys = new Set(recent.map(x => x.type + '|' + x.id));
 
-    // Tüm entity kaynaklarından derleme
-    const chars    = (S.chars || []).slice(0, 8).map(c => ({ type:'Karakter', name:c.name, id:c.id, img:c.image||null }));
-    const vehicles = (S._db?.vehicles || []).slice(0, 5).map(v => ({ type:'Araç', name:v.name||v.model||v.plate, id:v.id, img:null }));
-    const props    = (S._db?.properties || []).slice(0, 5).map(p => ({ type:'Mülk', name:p.name, id:p.id, img:null }));
+    // ── Bölüm 2: Odadaki son mesajlarda görünen entity'ler ─
+    const fromMsgs = this._fromMsgs().filter(x => !usedKeys.has(x.type + '|' + x.id));
+    const msgKeys  = new Set(fromMsgs.map(x => x.type + '|' + x.id));
 
-    // Birleştir: önce son kullanılanlar, sonra geri kalanlar (duplicate yok)
-    const recentKeys = new Set(recent.map(x => x.type + '|' + x.id));
-    const rest = [...chars, ...vehicles, ...props].filter(x => !recentKeys.has(x.type + '|' + x.id));
-    const all = [...recent, ...rest];
+    // ── Bölüm 3: Oturum sahibinin aktif karakterleri ───────
+    const myChars = (S.activeChars || []).map(c => ({ type:'Karakter', name:c.name, id:c.id, img:c.image||null }))
+      .filter(x => !usedKeys.has(x.type+'|'+x.id) && !msgKeys.has(x.type+'|'+x.id));
+    const myKeys  = new Set(myChars.map(x => x.type + '|' + x.id));
 
-    if (!all.length) { bar.style.display = 'none'; return; }
+    // ── Bölüm 4: Diğer karakterler + araçlar + mülkler ────
+    const allKeys = new Set([...usedKeys, ...msgKeys, ...myKeys]);
+    const otherChars = (S.chars || []).slice(0, 12).map(c => ({ type:'Karakter', name:c.name, id:c.id, img:c.image||null })).filter(x => !allKeys.has(x.type+'|'+x.id));
+    const vehicles   = (S._db?.vehicles || []).slice(0, 6).map(v => ({ type:'Araç', name:v.name||v.model||v.plate, id:v.id, img:null })).filter(x => !allKeys.has(x.type+'|'+x.id));
+    const props      = (S._db?.properties || []).slice(0, 6).map(p => ({ type:'Mülk', name:p.name, id:p.id, img:null })).filter(x => !allKeys.has(x.type+'|'+x.id));
+    const other = [...otherChars, ...vehicles, ...props];
+
+    // Hiç içerik yoksa gizle
+    const sections = [
+      { label:'Son',     items: recent },
+      { label:'Sahnede', items: fromMsgs },
+      { label:'Benim',   items: myChars },
+      { label:'Diğer',   items: other },
+    ].filter(s => s.items.length > 0);
+
+    if (!sections.length) { bar.style.display = 'none'; return; }
     bar.style.display = 'flex';
-
     bar.innerHTML = '';
 
-    // "Son" etiketi
-    if (recent.length) {
-      const lbl = document.createElement('span');
-      lbl.className = 'qe-label';
-      lbl.textContent = 'Son';
-      bar.appendChild(lbl);
-    }
-
-    let prevType = recent.length ? 'recent' : null;
-
-    all.forEach((item, idx) => {
-      // Separatör — recent bitti, diğerleri başlıyor
-      if (idx === recent.length && recent.length > 0 && rest.length > 0) {
+    sections.forEach((section, si) => {
+      // Bölüm ayracı (ilk bölümden önce yok)
+      if (si > 0) {
         const sep = document.createElement('div');
         sep.className = 'qe-sep';
         bar.appendChild(sep);
-        const lbl = document.createElement('span');
-        lbl.className = 'qe-label';
-        lbl.textContent = 'Diğer';
-        bar.appendChild(lbl);
-        prevType = 'other';
       }
+      // Bölüm etiketi
+      const lbl = document.createElement('span');
+      lbl.className = 'qe-label';
+      lbl.textContent = section.label;
+      bar.appendChild(lbl);
 
-      const meta = this._META[item.type] || { color:'#888', icon:'#' };
-      const ini = (item.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+      section.items.forEach(item => {
+        const meta = this._META[item.type] || { color:'#888' };
+        const ini = (item.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
-      const chip = document.createElement('div');
-      chip.className = 'qe-chip';
-      chip.style.cssText = `background:${meta.color}18;border-color:${meta.color}44;color:${meta.color}`;
-      chip.title = `${item.type}: ${item.name}  (tıkla → mesaja ekle)`;
+        const chip = document.createElement('div');
+        chip.className = 'qe-chip';
+        chip.style.cssText = `background:${meta.color}18;border-color:${meta.color}44;color:${meta.color}`;
+        chip.title = `${item.type}: ${item.name}  (tıkla → mesaja ekle)`;
 
-      const ava = item.img
-        ? `<img src="${item.img}" style="width:100%;height:100%;border-radius:50%;object-fit:cover" onerror="this.textContent='${ini}'" loading="lazy">`
-        : ini;
+        const ava = item.img
+          ? `<img src="${item.img}" style="width:100%;height:100%;border-radius:50%;object-fit:cover" onerror="this.textContent='${ini}'" loading="lazy">`
+          : ini;
 
-      chip.innerHTML = `<div class="qe-chip-ava" style="background:${meta.color}28;color:${meta.color}">${ava}</div>${item.name}`;
+        chip.innerHTML = `<div class="qe-chip-ava" style="background:${meta.color}28;color:${meta.color}">${ava}</div>${item.name}`;
 
-      chip.addEventListener('click', () => {
-        const inp = document.getElementById('msg-input');
-        if (!inp) return;
-        if (item.type === 'Karakter') {
-          // Karakter → **Ad:** prefix
-          const val = inp.value;
-          const prefix = `**${item.name}:** `;
-          inp.value = (val === '' || val.endsWith('\n')) ? val + prefix : val + '\n' + prefix;
-        } else {
-          // Diğer → [Tip:Ad] etiketi
-          const tag = `[${item.type}:${item.name}]`;
-          const cur = inp.selectionStart || inp.value.length;
-          const before = inp.value.slice(0, cur);
-          const after = inp.value.slice(cur);
-          inp.value = before + (before && !before.endsWith(' ') ? ' ' : '') + tag + ' ' + after;
-        }
-        inp.focus();
-        inp.style.height = 'auto';
-        inp.style.height = Math.min(inp.scrollHeight, 160) + 'px';
-        inp.selectionStart = inp.selectionEnd = inp.value.length;
-        // Kullanımı kaydet
-        QuickBar.trackUse(item.type, item.name, item.id, item.img);
-      });
+        chip.addEventListener('click', () => {
+          const inp = document.getElementById('msg-input');
+          if (!inp) return;
+          if (item.type === 'Karakter') {
+            const val = inp.value;
+            const prefix = `**${item.name}:** `;
+            inp.value = (val === '' || val.endsWith('\n')) ? val + prefix : val + '\n' + prefix;
+          } else {
+            const tag = `[${item.type}:${item.name}]`;
+            const cur = inp.selectionStart || inp.value.length;
+            const before = inp.value.slice(0, cur);
+            const after = inp.value.slice(cur);
+            inp.value = before + (before && !before.endsWith(' ') ? ' ' : '') + tag + ' ' + after;
+          }
+          inp.focus();
+          inp.style.height = 'auto';
+          inp.style.height = Math.min(inp.scrollHeight, 160) + 'px';
+          inp.selectionStart = inp.selectionEnd = inp.value.length;
+          QuickBar.trackUse(item.type, item.name, item.id, item.img);
+        });
 
-      bar.appendChild(chip);
-    });
+        bar.appendChild(chip);
+      }); // items.forEach
+    }); // sections.forEach
   },
 };
 window.QuickBar = QuickBar;
