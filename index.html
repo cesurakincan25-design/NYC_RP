@@ -571,11 +571,11 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
       </div>
       <i class="fas fa-chevron-up" style="font-size:11px;color:var(--t3)"></i>
     </div>
-    <div class="sb-char" id="char-sel-btn" title="Sahneye karakter ekle / çıkar">
-      <i class="fas fa-users" style="font-size:11px;color:var(--t3);flex-shrink:0"></i>
+    <div class="sb-char" id="char-sel-btn" title="Sık oynanan karakterleri yönet">
+      <i class="fas fa-star" style="font-size:11px;color:var(--t3);flex-shrink:0"></i>
       <div style="flex:1;min-width:0">
-        <div style="font-size:12px;font-weight:500;color:var(--t0)" id="ac-name">Sahne Karakterleri</div>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--t2)" id="ac-org">tıkla → ekle / çıkar</div>
+        <div style="font-size:12px;font-weight:500;color:var(--t0)" id="ac-name">Sık Oynanan Karakterler</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--t2)" id="ac-org">tıkla → yönet</div>
       </div>
       <i class="fas fa-chevron-up" style="font-size:10px;color:var(--t3)"></i>
     </div>
@@ -2892,20 +2892,19 @@ const UI={
     list.appendChild(el);
   },
   updChar(char){
-    // Artık primary karakter göstermiyoruz — sahne sayısını güncelle
-    const cnt=S.activeChars?.length||0;
+    // Sık Oynanan Karakterler sayacını güncelle
+    const cnt=(window.FavChars?._get()||[]).length;
     const nm=document.getElementById('ac-name');
     const og=document.getElementById('ac-org');
-    if(nm) nm.textContent='Sahne Karakterleri';
-    if(og) og.textContent=cnt?`${cnt} karakter sahnede`:'tıkla → ekle / çıkar';
+    if(nm) nm.textContent='Sık Oynanan Karakterler';
+    if(og) og.textContent=cnt?`${cnt} karakter favoride`:'tıkla → yönet';
   },
   renderTags(){
-    // Artık QuickBar şeridini render et
     if(window.QuickBar) QuickBar.render();
-    // Sidebar karakter sayacını güncelle
-    const cnt=S.activeChars?.length||0;
+    // Favori karakter sayacını güncelle
+    const cnt=(window.FavChars?._get()||[]).length;
     const og=document.getElementById('ac-org');
-    if(og) og.textContent=cnt?`${cnt} karakter sahnede`:'tıkla → ekle / çıkar';
+    if(og) og.textContent=cnt?`${cnt} karakter favoride`:'tıkla → yönet';
   },
   updateTxt(id,txt,edited){
     const el=document.querySelector(`[data-msg-id="${id}"]`);if(!el)return;
@@ -4564,7 +4563,7 @@ function _wireInput(){
       p.style.display=p.style.display==='none'?'':'none';
     }
   });
-  document.getElementById('char-sel-btn')?.addEventListener('click',()=>RP.openPicker());
+  document.getElementById('char-sel-btn')?.addEventListener('click',()=>FavChars.open());
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.mbd').forEach(el=>el.classList.add('hidden'));if(typeof Autocomplete!=='undefined')Autocomplete.hide();}});
   Login.init();
 }
@@ -4700,12 +4699,104 @@ const PlayerProfile={
   }
 };
 
+/* ═══ SIK OYNANAN KARAKTERLER ════════════════════════════ */
+const FavChars = {
+  _LS: 'rp_fav_chars',
+  _get(){ try{return JSON.parse(localStorage.getItem(this._LS)||'[]');}catch(e){return[];} },
+  _save(arr){ try{localStorage.setItem(this._LS,JSON.stringify(arr));}catch(e){} },
+  toggle(charId){
+    let favs=this._get();
+    const idx=favs.indexOf(charId);
+    if(idx===-1)favs.push(charId); else favs.splice(idx,1);
+    this._save(favs);
+    this._updateSidebar();
+    return idx===-1; // true=eklendi
+  },
+  isFav(charId){ return this._get().includes(charId); },
+  _updateSidebar(){
+    const cnt=this._get().length;
+    const og=document.getElementById('ac-org');
+    if(og) og.textContent=cnt?`${cnt} karakter favoride`:'tıkla → yönet';
+  },
+  open(){
+    let modal=document.getElementById('m-fav-chars');
+    if(!modal){
+      modal=document.createElement('div');modal.id='m-fav-chars';modal.className='mbd hidden';
+      modal.innerHTML=`<div class="mbox" style="max-width:560px;max-height:80vh;display:flex;flex-direction:column">
+        <div class="mhd"><span class="mti"><i class="fas fa-star" style="color:var(--gd);margin-right:6px"></i>Sık Oynanan Karakterler</span><button class="mcl" onclick="CM('m-fav-chars')"><i class="fas fa-times"></i></button></div>
+        <div style="padding:8px 16px;font-family:var(--mono);font-size:10px;color:var(--t2);background:var(--bg2);border-bottom:1px solid var(--ln)">
+          Sık oynadığın karakterleri buraya ekle. Bu liste sadece referans içindir — QuickBar ve mesaj gönderimi etkilenmez.
+        </div>
+        <div class="mbdy" style="flex:1;overflow-y:auto;padding:12px 16px">
+          <div class="cp-filter-bar" style="margin-bottom:10px">
+            <div class="cp-search-wrap"><i class="fas fa-search cp-search-icon"></i><input id="fc-search" class="cp-search" type="text" placeholder="İsim, alias, org ara…" autocomplete="off"></div>
+          </div>
+          <div id="fc-grid" class="cpg"></div>
+        </div>
+        <div class="mft">
+          <button class="btn btn-g" id="fc-clear-btn" onclick="FavChars._save([]);FavChars._renderGrid();FavChars._updateSidebar()"><i class="fas fa-broom"></i> Listeyi Temizle</button>
+          <button class="btn btn-p" onclick="CM('m-fav-chars')">Kapat</button>
+        </div>
+      </div>`;
+      document.body.appendChild(modal);
+      modal.addEventListener('click',e=>{if(e.target===modal)CM('m-fav-chars');});
+      modal.querySelector('#fc-search').addEventListener('input',e=>{this._searchTerm=e.target.value.trim().toLowerCase();this._renderGrid();});
+    }
+    OM('m-fav-chars');
+    this._renderGrid();
+    setTimeout(()=>modal.querySelector('#fc-search')?.focus(),80);
+  },
+  _searchTerm:'',
+  _renderGrid(){
+    const g=document.getElementById('fc-grid');if(!g)return;g.innerHTML='';
+    const favIds=this._get();
+    let chars=S.chars||[];
+    if(this._searchTerm){
+      const s=this._searchTerm;
+      chars=chars.filter(c=>[c.name,c.alias,c.occupation,...(c.organizations||[]).map(oid=>S.oi?.get(oid)?.name||'')].join(' ').toLowerCase().includes(s));
+    }
+    if(!chars.length){g.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:24px;font-family:var(--mono);font-size:11px;color:var(--t3)">Sonuç yok</div>';return;}
+    // Favorileri önce göster
+    chars=[...chars.filter(c=>favIds.includes(c.id)),...chars.filter(c=>!favIds.includes(c.id))];
+    chars.forEach(c=>{
+      const isFav=favIds.includes(c.id);
+      const org=RP._org((c.organizations||[])[0]||c.organization);
+      const orgColor=org?.color||'var(--t3)';
+      const playerUser=USERS?.find(u=>u.id===c.playerId);
+      const ini=(c.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+      const el=document.createElement('div');el.className='cpi-item'+(isFav?' active':'');
+      el.innerHTML=`<div class="cpa" style="${isFav?`border:2px solid ${orgColor};box-shadow:0 0 8px ${orgColor}44`:''}">
+        ${c.image?`<img src="${c.image}" onerror="this.parentNode.innerHTML='${ini}'" loading="lazy">`:ini}
+      </div><div class="cpin" style="flex:1;min-width:0">
+        <div class="cpnm">${c.name}</div>
+        <div class="cpal" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+          ${c.alias?`<span>"${c.alias}"</span>`:''}
+          ${org?`<span style="background:${orgColor}22;color:${orgColor};border:1px solid ${orgColor}44;font-family:var(--mono);font-size:9px;padding:1px 5px;border-radius:2px">${org.name}</span>`:''}
+          ${playerUser?`<span style="background:${playerUser.color}22;color:${playerUser.color};font-family:var(--mono);font-size:9px;padding:1px 5px;border-radius:2px">${playerUser.name}</span>`:'<span style="font-family:var(--mono);font-size:9px;color:var(--t3)">NPC</span>'}
+        </div>
+      </div><div style="font-size:15px;color:${isFav?'var(--gd)':'var(--t3)'};flex-shrink:0;margin-left:6px;cursor:pointer" title="${isFav?'Favorilerden çıkar':'Favorilere ekle'}">${isFav?'<i class="fas fa-star"></i>':'<i class="far fa-star"></i>'}</div>`;
+      el.addEventListener('click',()=>{
+        const nowFav=FavChars.toggle(c.id);
+        el.classList.toggle('active',nowFav);
+        el.querySelector('div[style*="font-size:15px"]').style.color=nowFav?'var(--gd)':'var(--t3)';
+        el.querySelector('div[style*="font-size:15px"]').innerHTML=nowFav?'<i class="fas fa-star"></i>':'<i class="far fa-star"></i>';
+        el.querySelector('div[style*="font-size:15px"]').title=nowFav?'Favorilerden çıkar':'Favorilere ekle';
+        el.querySelector('.cpa').style.cssText=nowFav?`border:2px solid ${orgColor};box-shadow:0 0 8px ${orgColor}44`:'';
+      });
+      el.addEventListener('contextmenu',e=>{e.preventDefault();CharCard.show(c.id,e.clientX,e.clientY);});
+      g.appendChild(el);
+    });
+  },
+};
+window.FavChars=FavChars;
+
 /* ═══ PM SYSTEM ══════════════════════════════════════════ */
 const PM={
   _convId:null,
   _userId:null,
   _pollTimer:null,
   _lastId:null,
+  _lastAt:null,
 
   async open(targetUserId){
     const target=USERS?.find(u=>u.id===targetUserId);
@@ -4773,6 +4864,7 @@ const PM={
     try{
       const rows=await DB.get(`dm_messages?conversation_id=eq.${convId}&is_deleted=eq.false&order=created_at.asc&limit=100`);
       this._lastId=rows.length?rows[rows.length-1].id:null;
+      this._lastAt=rows.length?rows[rows.length-1].created_at:null;
       this._renderMessages(rows);
     }catch(e){msgEl.innerHTML='<div style="text-align:center;padding:20px;font-family:var(--mono);font-size:11px;color:var(--rd)">Yüklenemedi</div>';}
   },
@@ -4780,13 +4872,17 @@ const PM={
   async _pollMessages(convId){
     if(!convId)return;
     try{
-      const qs=this._lastId
-        ?`dm_messages?conversation_id=eq.${convId}&id=gt.${this._lastId}&is_deleted=eq.false&order=created_at.asc`
+      // Firestore'da doc ID'ye gt filtresi çalışmaz — created_at ile filtrele
+      const qs=this._lastAt
+        ?`dm_messages?conversation_id=eq.${convId}&created_at=gt.${this._lastAt}&order=created_at.asc`
         :`dm_messages?conversation_id=eq.${convId}&is_deleted=eq.false&order=created_at.asc&limit=100`;
       const rows=await DB.get(qs);
       if(!rows.length)return;
+      const newRows=rows.filter(r=>!r.is_deleted);
+      if(!newRows.length){this._lastAt=rows[rows.length-1].created_at;return;}
+      this._lastAt=rows[rows.length-1].created_at;
       this._lastId=rows[rows.length-1].id;
-      rows.forEach(msg=>this._appendMessage(msg));
+      newRows.forEach(msg=>this._appendMessage(msg));
     }catch(e){}
   },
 
@@ -4843,7 +4939,7 @@ const PM={
     if(RT._unsubDM){try{RT._unsubDM();}catch(e){}RT._unsubDM=null;}
     const win=document.getElementById('pm-window');
     if(win)win.style.display='none';
-    this._convId=null;this._userId=null;this._lastId=null;
+    this._convId=null;this._userId=null;this._lastId=null;this._lastAt=null;
   }
 };
 
