@@ -5023,6 +5023,18 @@ const MasterAgent = {
       '  @KarakterAdı          → oyuncu/karakter etiket (bildirim gönderir)',
       'ÖRNEK: SEND_MSG:{"content":"*Yavaşça öne çıkar ve ellerini havaya kaldırır.* Kaçmıyorum, sakin ol.","char_name":"Marcus Webb"}',
       '',
+      '== SETUP MESAJI KURALI ==',
+      'Kullanıcı "setup at", "session başlat" veya "ortam kur" dediğinde YALNIZCA şehir atmosferi ve ortam betimlemesi yap.',
+      'Setup mesajı şu formatı takip eder — başka hiçbir şey ekleme:',
+      '',
+      '# New York City Setup',
+      '',
+      '**New York City 🗽, NY, USA 🇺🇸 — [SAAT]**',
+      '',
+      '[Mevcut RP saatine, mevsime ve hava durumuna göre 1–2 paragraf şehir atmosferi: sokaklar, trafik, kalabalık, ışıklar, sesler. Sinematik ama doğal. Her seferinde farklı detay. Olay/aksiyon/karakter hareketi OLMAZ.]',
+      '',
+      'SEND_MSG içinde char_name kullanma — setup mesajı anonim gönderilir: SEND_MSG:{"content":"# New York City Setup\\n\\n**New York City 🗽, NY, USA 🇺🇸 — [SAAT]**\\n\\n[atmosfer metni]"}',
+      '',
       '== NSFW / HASSAS İÇERİK ==',
       'NSFW/hassas içerikli mesajlar [Hassas içerik — gizli] olarak işaretlenir ve sen bu içerikleri göremezsin.',
       'Bu tür içerikleri analiz etme, tekrar etme veya türetme.',
@@ -5556,7 +5568,8 @@ const Session = {
     this._mode = mode;
     this._startTime = new Date();
     this._startMsgId = null;
-    const setupPrompt = `Yeni bir RP sessionu başlatılıyor. RP ortamı için kapsamlı bir setup mesajı hazırla ve SEND_MSG komutu ile RP odasına gönder. Setup şunları içermeli: ortam tanımı, hava durumu, aktif lokasyonlar, güncel gerilim/olaylar. Bunu bir setup mesajı olarak hazırla — RP'nin açılışı gibi.`;
+    const rpTimeNow = S.roomId ? RpTime.get(S.roomId) : '—';
+    const setupPrompt = `Yeni bir RP sessionu başlatılıyor. Aşağıdaki formatta bir Setup mesajı yaz ve SEND_MSG komutuyla RP odasına gönder.\n\nKural: Setup sadece atmosfer ve ortam betimler — olay, aksiyon veya karakter aksiyonu OLMAZ. Sinematik, doğal, 1–2 paragraf.\n\nFormat:\n# New York City Setup\n\n**New York City 🗽, NY, USA 🇺🇸 — ${rpTimeNow}**\n\n[Mevcut RP saatine ve mevsime göre şehrin atmosferini, sokaklarını, trafiğini, insan kalabalığını betimle. Her seferinde özgün detaylar kullan.]\n\nSadece bu formatı kullan. Başka açıklama ekleme.`;
     MASidebar.quick(setupPrompt);
     this._updateBtn();
     toast('🎬 Session başlatılıyor…', 'info');
