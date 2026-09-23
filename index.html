@@ -530,6 +530,7 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
         <button class="ma-sb-qbtn" onclick="MASidebar.quick('DM bağlamını güncelle. READ_DM')">📖 DM</button>
         <button class="ma-sb-qbtn" onclick="MASidebar.quick('Şu anki RP ortamına uygun küçük bir sokak olayı yarat ve ilgili karakterleri oynayarak sahneye yaz (SEND_MSG kullan).')">🌐 Olay</button>
         <button class="ma-sb-qbtn" onclick="MASidebar.setupAct()">⏰ Setup At</button>
+        <button class="ma-sb-qbtn" id="ma-auto-toggle" onclick="MASidebar.toggleAuto()" title="Mesaj gönderince MA otomatik sahneyi devam ettirir">🤖 Oto: AÇ</button>
       </div>
       <!-- Input -->
       <div id="ma-sb-inp-row">
@@ -1184,7 +1185,13 @@ const RP={
       S.msgs[S.roomId].push(loc);UI.append(loc);document.getElementById('empty-state')?.remove();
       return;
     }
-    try{await DB.post('rp_messages',pl);}catch(e){toast('Gönderilemedi','error');}
+    try{
+      await DB.post('rp_messages',pl);
+      // Auto-react: let MA continue the scene after user sends a message
+      if(window.MasterAgent && MasterAgent._autoEnabled !== false){
+        setTimeout(()=>MasterAgent._autoReact(pl), 1200);
+      }
+    }catch(e){toast('Gönderilemedi','error');}
   },
   async editMsg(id,newTxt,newRpTime){
     if(!newTxt.trim())return;
@@ -3686,17 +3693,23 @@ const MasterAgent = {
       'GEN_EVENT          → (Sadece GM onayı gereken büyük olaylar için) Dünya olayı modalını aç',
       'GEN_DISPATCH:NPC_ID → (Sadece GM onayı gereken durumlar için) Dispatch modalını aç',
       '',
-      'SEND_MSG:{"content":"Mesaj metni","char_id":"KAR_ID","char_name":"Karakter Adı","room_id":"ODA_ID"}',
+      'SEND_MSG:{"content":"Mesaj metni","char_name":"Karakter Adı"}',
       '  → RP odasına belirtilen karakter adına mesaj atar — EN SIK KULLANACAĞIN KOMUT BU.',
-      '  → char_id ve char_name için mevcut karakterleri kullan (aşağıda liste var).',
       '  → room_id belirtilmezse aktif oda kullanılır.',
       '  → Aksiyon/emote için yıldız kullan: *Araçtan iner ve sahneye yaklaşır*',
-      '  → ÖRNEK: SEND_MSG:{"content":"*Telsizi eline alır* Bütün birimler dikkat! 10-4.","char_name":"Marcus Webb","char_id":"chr_12"}',
+      '',
+      '  KARİŞTER KURALI:',
+      '  - Mevcut karakter listesindeki biri oynuyorsa → char_id DE VER.',
+      '    ÖRNEK: SEND_MSG:{"content":"*Silahını çeker*","char_name":"Marcus Webb","char_id":"BURAYA_ID"}',
+      '  - Yeni NPC / geçici karakter ise → char_id VERME, sadece char_name ver.',
+      '    ÖRNEK: SEND_MSG:{"content":"*Panikle araçtan iner* Özür dilerim, frenim tutmadı!","char_name":"Siyah Sedan Sürücüsü"}',
+      '  - NPC bir örgüte aitse org_name ekle:',
+      '    ÖRNEK: SEND_MSG:{"content":"10-4, yolda.","char_name":"Devriye 7","org_name":"NYPD"}',
       '  → Birden fazla karakter için birden fazla SEND_MSG kullanabilirsin.',
       '',
-      '== AKTİF KARİŞTERLER (odaya mesaj atmak için kullan) ==',
+      '== AKTİF KARİŞTERLER (char_id gereken mevcut karakterler) ==',
       (S.chars||[]).filter(c=>c.status!=='Deceased').slice(0,30).map(c=>
-        `  ${c.id} | ${c.name}${c.alias?' ('+c.alias+')':''}`
+        `  char_id:"${c.id}" | ${c.name}${c.alias?' ('+c.alias+')':''}`
       ).join('\n') || '  (karakter listesi yüklenmedi)',
       '',
       '== DÜNYA DURUMU ==',
@@ -3790,29 +3803,41 @@ const MasterAgent = {
         if (!roomId) throw new Error('Aktif oda yok');
         if (!params.content?.trim()) throw new Error('İçerik boş');
 
-        // Resolve char info — try to find existing char or use provided fields
-        let charId   = params.char_id   || null;
-        let charName = params.char_name || 'Master Agent';
-        let charAlias = '';
-        let charAvatar = '';
+        // Resolve char info:
+        // - If char_id given AND matches an existing char → use that char's real data
+        // - Otherwise → treat as NPC (no char_id, name as given, sent_by_user=null)
+        let charId    = null;
+        let charName  = params.char_name || 'NPC';
+        let charAlias = params.char_alias || '';
+        let charAvatar = params.char_avatar || '';
         let orgId = null, orgName = null, orgColor = null;
+        let isRealChar = false;
 
-        if (charId) {
-          const found = (S.chars || []).find(c => String(c.id) === String(charId));
+        if (params.char_id) {
+          const found = (S.chars || []).find(c => String(c.id) === String(params.char_id));
           if (found) {
+            isRealChar = true;
+            charId     = found.id;
             charName   = found.name;
             charAlias  = found.alias || '';
             charAvatar = found.image || '';
             const org  = S.oi?.get((found.organizations||[])[0] || found.organization);
             if (org) { orgId = org.id; orgName = org.name; orgColor = org.color || null; }
           }
+          // If char_id not found in S.chars → ignore it, treat as NPC
+        }
+
+        // org override from params (for NPC org context)
+        if (!isRealChar && params.org_name) {
+          orgName  = params.org_name;
+          orgColor = params.org_color || null;
         }
 
         const rpTime = await RpTime.onMessage(roomId, params.content);
 
         const pl = {
           room_id:     roomId,
-          char_id:     charId,
+          char_id:     charId,            // null for NPCs — no accidental ID collision
           char_name:   charName,
           char_alias:  charAlias,
           char_avatar: charAvatar,
@@ -3823,7 +3848,8 @@ const MasterAgent = {
           attachment_url: null,
           reactions:   {},
           is_edited:   false,
-          sent_by_user: S.user?.id || null,
+          // NPCs are not owned by a real user — avoids wrong player attribution
+          sent_by_user: isRealChar ? (S.user?.id || null) : null,
           rp_time:     rpTime || null,
         };
 
@@ -3838,19 +3864,21 @@ const MasterAgent = {
   },
 
   /* ── Send a message ──────────────────────────────────── */
-  async send(userText) {
+  async send(userText, opts = {}) {
     if (this._busy) return;
     if (!userText.trim()) return;
     this._busy = true;
+    const silent = opts.silent === true; // auto-react mode: don't show thinking in main chat
 
     // Rebuild system prompt each time (active char/room may have changed)
     this._SYSTEM = this._buildSystem();
 
     // Push user message — include transcript only when needed (billing-efficient)
-    const withTranscript = this._needsTranscript(userText);
+    // Auto-react always gets transcript (it IS the scene continuation trigger)
+    const withTranscript = silent ? true : this._needsTranscript(userText);
     const fullUserText = this._liveCtx(withTranscript) + '\n\n' + userText;
     this._history.push({ role: 'user', parts: [{ text: fullUserText }] });
-    this._renderHistory();
+    if (!silent) this._renderHistory();
 
     try {
       // Gemini multi-turn via _geminiGenerate with history
@@ -3886,11 +3914,18 @@ const MasterAgent = {
       // Store raw reply in history (for multi-turn context), show augmented in UI
       const displayReply = toolResult ? reply + '\n\n---\n' + toolResult : reply;
       this._history.push({ role: 'model', parts: [{ text: displayReply }] });
-      this._renderHistory();
+      if (!silent) this._renderHistory();
+      else {
+        // Silent auto-react: show a subtle notification in sidebar
+        if (window.MASidebar) {
+          MASidebar._appendMsg(displayReply, 'model');
+        }
+      }
+      return reply;
     } catch (e) {
       const errMsg = '❌ Hata: ' + e.message;
       this._history.push({ role: 'model', parts: [{ text: errMsg }] });
-      this._renderHistory();
+      if (!silent) this._renderHistory();
     } finally {
       this._busy = false;
     }
@@ -3955,6 +3990,40 @@ const MasterAgent = {
     inp.value = '';
     this.send(txt);
   },
+
+  /* ── Auto-react: called after user sends an RP message ── */
+  _autoEnabled: true,
+  _lastAutoAt: 0,
+
+  async _autoReact(sentMsg) {
+    // Don't auto-react if MA is busy or auto was recently triggered (30s cooldown)
+    if (this._busy) return;
+    if (Date.now() - this._lastAutoAt < 30000) return;
+    this._lastAutoAt = Date.now();
+
+    const charName = sentMsg.char_name || '?';
+    const content  = sentMsg.content  || '';
+
+    // Build a concise auto-prompt — don't inject full liveCtx (billing efficient)
+    const autoPrompt = [
+      `[OTO-DEVAM] ${charName} şunu söyledi/yaptı: "${content.slice(0,200)}"`,
+      '',
+      'Sahneyi oyuncu olarak devam ettir:',
+      '- Mevcut NPC\'leri veya çevredeki karakterleri kullanarak doğal bir tepki yaz.',
+      '- Yeni NPC gerekiyorsa kısa bir tasvir ekle.',
+      '- Mesajını SEND_MSG komutuyla doğrudan odaya gönder.',
+      '- Tek bir aksiyon/tepki yeterli — sahneyi uzatma.',
+      '- Eğer sahne zaten tamamsa veya tepki gerekmiyorsa sadece "Bekliyorum." yaz.',
+    ].join('\n');
+
+    try {
+      const reply = await this.send(autoPrompt, { silent: true });
+      // Sync to sidebar so user can see MA acted
+      if (window.MASidebar) MASidebar._syncLastReply();
+    } catch(e) {
+      console.warn('[MA Auto] Error:', e.message);
+    }
+  },
 };
 
 window.MasterAgent = MasterAgent;
@@ -3978,6 +4047,19 @@ const MASidebar = {
     const inp = document.getElementById('ma-sb-inp');
     if (inp) inp.value = text;
     this.send();
+  },
+
+  /* ── Toggle auto-react on/off ── */
+  toggleAuto() {
+    if (!window.MasterAgent) return;
+    MasterAgent._autoEnabled = !MasterAgent._autoEnabled;
+    const btn = document.getElementById('ma-auto-toggle');
+    if (btn) {
+      const on = MasterAgent._autoEnabled;
+      btn.textContent = `🤖 Oto: ${on ? 'AÇ' : 'KPL'}`;
+      btn.style.borderColor = on ? 'rgba(124,77,255,.5)' : 'rgba(255,80,80,.4)';
+      btn.style.color = on ? 'var(--ac)' : 'var(--rd)';
+    }
   },
 
   /* ── Setup At — ask MA to schedule a scene/event ── */
