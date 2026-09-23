@@ -16,6 +16,9 @@ const DMPanel = {
   _pendingNpcId: null,
   _queueItems:   [],
   _dmReady:      false,
+  _autoLoop:     false,      // otomatik DM okuma aktif mi
+  _autoInterval: null,       // setInterval handle
+  _autoSecs:     60,         // kaç saniyede bir okusun (default 60s)
 
   /* ─ Open / Close ─────────────────────────────────── */
   async open() {
@@ -32,6 +35,7 @@ const DMPanel = {
     this._refreshContext();
     this._populateRoomSelects();
     this._populateOrgSelect();
+    this._updateAutoBtn();
   },
 
   close() {
@@ -277,10 +281,14 @@ const DMPanel = {
         await window.DMEngine.approveEvent(id, S.user?.id || 'admin');
         toast('Dünya olayı onaylandı!', 'success');
       } else {
-        const liveRoom = S.rooms.find(r => r.slug === 'live') || S.rooms[0];
-        if (!liveRoom) throw new Error('Live oda bulunamadı');
+        // slug, name veya id'de 'live' geçen odayı bul; yoksa aktif odayı, yoksa ilk odayı kullan
+        const liveRoom = S.rooms.find(r =>
+          (r.slug||'').toLowerCase().includes('live') ||
+          (r.name||'').toLowerCase().includes('live')
+        ) || S.rooms.find(r => r.id == S.roomId) || S.rooms[0];
+        if (!liveRoom) throw new Error('Oda bulunamadı');
         await window.DMEngine.approveDispatch(id, liveRoom.id, S.user?.id || 'admin');
-        toast('Dispatch yayınlandı → Live oda', 'success');
+        toast(`Dispatch yayınlandı → #${liveRoom.name||liveRoom.id}`, 'success');
       }
       this._queueItems = this._queueItems.filter(i => i.data.id != id);
       this._renderQueue();
@@ -388,6 +396,64 @@ const DMPanel = {
     if (st) {
       st.textContent = txt;
       st.style.color = { active:'var(--gn)', thinking:'var(--am)', error:'var(--rd)' }[cls] || 'var(--t2)';
+    }
+  },
+
+  /* ─ Otomatik Loop ─────────────────────────────────── */
+  toggleAutoLoop() {
+    if (this._autoLoop) {
+      this._stopAutoLoop();
+    } else {
+      this._startAutoLoop();
+    }
+  },
+
+  _startAutoLoop() {
+    if (this._autoInterval) clearInterval(this._autoInterval);
+    this._autoLoop = true;
+    this._autoInterval = setInterval(async () => {
+      if (!window.DMEngine || !S.roomId) return;
+      try {
+        await window.DMEngine.readNow(S.roomId);
+      } catch(e) {
+        console.warn('[DM Auto] Read hatası:', e.message);
+      }
+    }, this._autoSecs * 1000);
+    this._updateAutoBtn();
+    toast(`DM otomatik okuma aktif (her ${this._autoSecs}s)`, 'success');
+    console.log(`[DM] Auto loop started — every ${this._autoSecs}s`);
+  },
+
+  _stopAutoLoop() {
+    if (this._autoInterval) clearInterval(this._autoInterval);
+    this._autoInterval = null;
+    this._autoLoop = false;
+    this._updateAutoBtn();
+    toast('DM otomatik okuma durduruldu', 'warn');
+    console.log('[DM] Auto loop stopped');
+  },
+
+  setAutoInterval(secs) {
+    this._autoSecs = parseInt(secs) || 60;
+    if (this._autoLoop) {
+      this._stopAutoLoop();
+      this._startAutoLoop();
+    }
+  },
+
+  _updateAutoBtn() {
+    const btn = document.getElementById('dm-auto-btn');
+    if (!btn) return;
+    if (this._autoLoop) {
+      btn.innerHTML = `<i class="fas fa-stop-circle"></i> Otomatik: AÇIK (${this._autoSecs}s)`;
+      btn.style.color      = 'var(--gn)';
+      btn.style.borderColor = 'var(--gn)';
+      btn.style.background  = 'rgba(0,200,100,.08)';
+    } else {
+      btn.innerHTML = '<i class="fas fa-play-circle"></i> Otomatik: KAPALI';
+      btn.style.color      = 'var(--t2)';
+      btn.style.borderColor = '';
+      btn.style.background  = '';
     }
   },
 };
