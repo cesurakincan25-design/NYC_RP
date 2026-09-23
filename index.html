@@ -1598,14 +1598,7 @@ const RP={
       const ref = await DB.post('rp_messages',pl);
       // QuickBar: kullanılan karakteri/entity'yi kaydet
       if(sendChar) QuickBar?.trackUse('Karakter', sendChar.name, sendChar.id, sendChar.image||null);
-      // Auto-react: reply_to_id varsa ve MA'nın gönderdiği mesajsa tetikle
-      if(window.MasterAgent && MasterAgent._autoEnabled !== false){
-        const replyToId = pl.reply_to_id || null;
-        const maReplied = replyToId && MasterAgent._sentIds?.has(replyToId);
-        if(maReplied){
-          setTimeout(()=>MasterAgent._autoReact(pl), 1200);
-        }
-      }
+      // Oto-devam artık RT._handleMsg içindeki _onIncomingMsg ile yapılıyor — burada sadece @MA mention kontrolü
       // @mention bildirimi — etiketlenen oyuncuları bul ve toast'a yansıt
       const mentionMatches=txt.match(/@([A-Za-zÇĞİÖŞÜçğışöü][A-Za-zÇĞİÖŞÜçğışöü\s]{0,20}?)(?=\s|$)/g)||[];
       // @MA / @MasterAgent mention — MA sidebar'a yönlendir (everyone broadcast'ten ayrı)
@@ -2336,6 +2329,8 @@ const RT={
     if(rec.char_id){ delete S.typing[rec.char_id]; UI.renderTyping(); }
     OAI.Batcher.ingest([rec]);
     if (window.Session) Session.onNewMessage(rec);
+    // MA oto-devam: herhangi bir oyuncu mesajı gelince tetikle (notify bağımsız — kendi mesajı da sayılır)
+    if (window.MasterAgent && !MasterAgent._sentIds?.has(rec.id)) MasterAgent._onIncomingMsg(rec);
     // Notify if from someone else
     if(notify&&rec.sent_by_user&&rec.sent_by_user!==S.user?.id){
       const room=S.rooms.find(r=>r.id==S.roomId);
@@ -2825,14 +2820,25 @@ const UI={
     const area=document.getElementById('typing-area');
     const list=Object.values(S.typing);
     if(!list.length){area.innerHTML='';return;}
-    // Show: "Eren (Wrench) yazıyor..."
-    const parts=list.slice(0,3).map(t=>{
-      const color=t.userColor||'var(--t2)';
-      const name=t.userName||t.charName||'?';
-      const char=t.charName&&t.charName!==name?` <span style="color:var(--t3);font-style:normal">(${t.charName})</span>`:'';
-      return `<span style="color:${color};font-weight:600">${name}</span>${char}`;
-    });
-    area.innerHTML=`<span class="typing-dots"><span></span><span></span><span></span></span><span class="typing-text">${parts.join(', ')} yazıyor…</span>`;
+    // MA özel gösterim
+    const maEntry=list.find(t=>t._ma);
+    const others=list.filter(t=>!t._ma).slice(0,3);
+    let html='';
+    if(maEntry){
+      html+=`<span class="typing-dots" style="color:var(--pu)"><span></span><span></span><span></span></span><span class="typing-text"><span style="color:var(--pu);font-weight:600">Master Agent</span> düşünüyor…</span>`;
+      if(others.length) html+=' &nbsp;';
+    }
+    if(others.length){
+      const parts=others.map(t=>{
+        const color=t.userColor||'var(--t2)';
+        const name=t.userName||t.charName||'?';
+        const char=t.charName&&t.charName!==name?` <span style="color:var(--t3);font-style:normal">(${t.charName})</span>`:'';
+        return `<span style="color:${color};font-weight:600">${name}</span>${char}`;
+      });
+      if(!maEntry) html+=`<span class="typing-dots"><span></span><span></span><span></span></span>`;
+      html+=`<span class="typing-text">${parts.join(', ')} yazıyor…</span>`;
+    }
+    area.innerHTML=html;
   },
 
   renderMembers(){
@@ -5246,9 +5252,9 @@ Login._start=async function(u){
       <div style="padding:8px 12px;border-bottom:1px solid var(--ln);background:var(--bg2)">
         <div style="font-family:var(--mono);font-size:9px;color:var(--t3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">MA Ayarları</div>
         <div style="display:flex;flex-direction:column;gap:5px">
-          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t1);cursor:pointer">
-            <input type="checkbox" id="ma-auto-chk" onchange="MasterAgent._autoEnabled=this.checked;document.getElementById('ma-auto-toggle').textContent='🤖 Oto: '+(this.checked?'AÇ':'KPL')" checked>
-            Otomatik Tepki
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t1);cursor:pointer" title="MA mesaj attıktan sonra oyuncu yanıt verince sahneyi otomatik devam ettirir (2dk pencere, 45s cooldown)">
+            <input type="checkbox" id="ma-auto-chk" onchange="MasterAgent._autoEnabled=this.checked;document.getElementById('ma-auto-toggle').textContent='🤖 Oto: '+(this.checked?'AÇ':'KPL');document.getElementById('ma-auto-toggle-2')&&(document.getElementById('ma-auto-toggle-2').textContent='🤖 Oto: '+(this.checked?'AÇ':'KAPALI'))" checked>
+            Oto Sahne Devamı
           </label>
           <div style="display:flex;align-items:center;gap:6px">
             <span style="font-size:10px;color:var(--t2);font-family:var(--mono)">Model:</span>
@@ -6143,6 +6149,7 @@ const MasterAgent = {
         if (msgRef?.id) {
           if (!MasterAgent._sentIds) MasterAgent._sentIds = new Set();
           MasterAgent._sentIds.add(msgRef.id);
+          MasterAgent._lastSentAt = Date.now(); // oto-devam penceresi başlat
           if (window.Session) Session.onMAMessage(msgRef.id);
           if (MasterAgent._sentIds.size > 50) {
             // Set'i küçük tut — en eski 25'i sil
@@ -6167,6 +6174,9 @@ const MasterAgent = {
     if (!userText.trim()) return;
     this._busy = true;
     const silent = opts.silent === true; // auto-react mode: don't show thinking in main chat
+    // Typing indicator — chatte "Master Agent düşünüyor…" göster
+    S.typing['__ma__'] = { charName: 'Master Agent', userName: 'Master Agent', userColor: 'var(--pu)', _ma: true };
+    if (window.UI) UI.renderTyping();
 
     // Rebuild system prompt each time (active char/room may have changed)
     this._SYSTEM = this._buildSystem();
@@ -6227,6 +6237,9 @@ const MasterAgent = {
       if (!silent) this._renderHistory();
     } finally {
       this._busy = false;
+      // Typing indicator'ı kaldır
+      delete S.typing['__ma__'];
+      if (window.UI) UI.renderTyping();
     }
   },
 
@@ -6307,12 +6320,15 @@ const MasterAgent = {
   /* ── Auto-react: called after user sends an RP message ── */
   _autoEnabled: true,
   _lastAutoAt: 0,
+  _lastSentAt: 0,       // MA'nın en son mesaj gönderdiği zaman
+  _autoWindow: 120000,  // MA mesajından sonra kaç ms içinde gelen mesaj tetikler (2dk)
+  _autoCooldown: 45000, // Oto-devam sonrası minimum bekleme (45s)
   _sentIds: new Set(), // MA'nın gönderdiği mesaj ID'leri — reply kontrolü için
 
   async _autoReact(sentMsg) {
-    // Don't auto-react if MA is busy or auto was recently triggered (30s cooldown)
+    // Don't auto-react if MA is busy or auto was recently triggered
     if (this._busy) return;
-    if (Date.now() - this._lastAutoAt < 30000) return;
+    if (Date.now() - this._lastAutoAt < this._autoCooldown) return;
     this._lastAutoAt = Date.now();
 
     const charName = sentMsg.char_name || '?';
@@ -6337,6 +6353,41 @@ const MasterAgent = {
     } catch(e) {
       console.warn('[MA Auto] Error:', e.message);
     }
+  },
+
+  // Gelen her yeni mesajda RT tarafından çağrılır
+  _onIncomingMsg(msg) {
+    if (!this._autoEnabled) return;
+    if (this._busy) return;
+    // MA'nın kendi gönderdiği mesajları sayma
+    if (this._sentIds?.has(msg.id)) return;
+    // MA mesajı mı? (char_name kontrolü — bu da sayılmaz)
+    if ((msg.char_name || '').toLowerCase().includes('master agent')) return;
+
+    // MA'nın son mesajını bul: ya _lastSentAt (bu session'da gönderdi), ya da odadaki son MA mesajı
+    let maRecentlySpoke = false;
+    if (this._lastSentAt > 0 && Date.now() - this._lastSentAt < this._autoWindow) {
+      maRecentlySpoke = true;
+    } else {
+      // Sayfa yenilendi — S.msgs içinde son 10 mesajda MA mesajı var mı?
+      const roomMsgs = (S?.msgs?.[S?.roomId] || []);
+      const recent = roomMsgs.slice(-10);
+      const lastMAMsg = recent.reverse().find(m => (m.char_name || '').toLowerCase().includes('master agent'));
+      if (lastMAMsg) {
+        const lastMATime = new Date(lastMAMsg.created_at).getTime();
+        if (Date.now() - lastMATime < this._autoWindow) {
+          maRecentlySpoke = true;
+          // _lastSentAt'ı güncelle ki bir sonraki mesajda tekrar arama yapmayalım
+          this._lastSentAt = lastMATime;
+        }
+      }
+    }
+
+    if (!maRecentlySpoke) return;
+    // Cooldown kontrolü
+    if (Date.now() - this._lastAutoAt < this._autoCooldown) return;
+    // Tetikle
+    setTimeout(() => this._autoReact(msg), 1500);
   },
   async _entityCheck(msg, entityMatches) {
     if(this._busy) return;
@@ -6876,6 +6927,10 @@ const MAPanel = {
     // Auto toggle
     const autoTxt = document.getElementById('ma-panel-auto-txt');
     if (autoTxt) autoTxt.textContent = (window.MasterAgent?._autoEnabled !== false) ? '🤖 Oto: AÇ' : '🤖 Oto: KAPALI';
+    const autoChk = document.getElementById('ma-auto-chk');
+    if (autoChk) autoChk.checked = (window.MasterAgent?._autoEnabled !== false);
+    const sbTgl = document.getElementById('ma-auto-toggle');
+    if (sbTgl) sbTgl.textContent = (window.MasterAgent?._autoEnabled !== false) ? '🤖 Oto: AÇ' : '🤖 Oto: KAPALI';
   },
 };
 
