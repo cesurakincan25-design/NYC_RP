@@ -5245,8 +5245,8 @@ Login._start=async function(u){
     <!-- LEFT: MA Characters panel -->
     <div class="dm-col" style="width:260px;flex-shrink:0">
       <div class="dm-col-head">
-        <span class="dm-col-title"><i class="fas fa-robot" style="margin-right:5px;color:var(--pu)"></i>MA Karakterleri</span>
-        <button onclick="MAPanel.loadMAChars()" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:11px" title="Yenile"><i class="fas fa-sync-alt"></i></button>
+        <span class="dm-col-title"><i class="fas fa-robot" style="margin-right:5px;color:var(--pu)"></i>MA Panel</span>
+        <button onclick="MAPanel.loadMAChars()" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:11px" title="Karakterleri Yenile"><i class="fas fa-sync-alt"></i></button>
       </div>
       <!-- MA Settings -->
       <div style="padding:8px 12px;border-bottom:1px solid var(--ln);background:var(--bg2)">
@@ -5271,6 +5271,19 @@ Login._start=async function(u){
           </div>
         </div>
       </div>
+      <!-- MA Genel Sohbet butonu -->
+      <div id="ma-general-chat-btn" onclick="MAPanel.openGeneralChat()"
+        style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--ln);cursor:pointer;background:var(--bg1);transition:background .15s"
+        onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background='var(--bg1)'">
+        <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,rgba(155,111,212,.35),rgba(74,143,226,.25));border:1px solid rgba(155,111,212,.5);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">🤖</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600;color:var(--t0)">Master Agent</div>
+          <div style="font-size:10px;color:var(--t3)">Genel sohbet</div>
+        </div>
+        <div id="ma-general-active-dot" style="display:none;width:7px;height:7px;border-radius:50%;background:var(--pu);flex-shrink:0"></div>
+      </div>
+      <!-- Karakterler başlığı -->
+      <div style="padding:6px 12px 4px;font-family:var(--mono);font-size:9px;color:var(--t3);letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid var(--ln)">Oynanan Karakterler</div>
       <!-- MA char list -->
       <div class="dm-body" id="ma-char-list">
         <div class="empty" style="font-size:11px;padding:20px"><i class="fas fa-robot" style="color:rgba(155,111,212,.3)"></i><p style="color:var(--t3)">MA henüz karakter oynamadı.</p></div>
@@ -5279,6 +5292,16 @@ Login._start=async function(u){
 
     <!-- RIGHT: Chat area -->
     <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0">
+      <!-- Chat header — kimin sohbetinde olduğunu gösterir -->
+      <div id="ma-chat-header" style="height:40px;border-bottom:1px solid var(--ln);background:var(--bg1);display:flex;align-items:center;gap:10px;padding:0 16px;flex-shrink:0">
+        <div style="width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,rgba(155,111,212,.35),rgba(74,143,226,.25));border:1px solid rgba(155,111,212,.5);display:flex;align-items:center;justify-content:center;font-size:11px" id="ma-chat-header-icon">🤖</div>
+        <div>
+          <span style="font-size:12px;font-weight:600;color:var(--t0)" id="ma-chat-header-name">Master Agent</span>
+          <span style="font-size:10px;color:var(--t3);margin-left:6px" id="ma-chat-header-sub">Genel sohbet</span>
+        </div>
+        <div style="flex:1"></div>
+        <button id="ma-chat-back-btn" onclick="MAPanel.closeCharChat()" style="display:none;background:none;border:none;color:var(--t3);cursor:pointer;font-size:11px;padding:3px 8px;border-radius:4px;border:1px solid var(--ln)" title="Geri dön"><i class="fas fa-arrow-left"></i> Geri</button>
+      </div>
       <!-- Chat history -->
       <div id="ma-chat" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px">
         <div class="ma-empty"><i class="fas fa-robot"></i><p>Master Agent hazır.<br><small>Herhangi bir RP sorusu sorun veya bir eylem isteyin.</small></p></div>
@@ -5517,8 +5540,12 @@ Object.assign(window.DMPanel, {
     if (window.MAPanel) {
       MAPanel._loadLS(); // localStorage'dan önce yükle — hızlı görünüm
       if (!MAPanel._chars?.length) MAPanel.loadMAChars(); else { MAPanel._render(); MAPanel.loadMAChars(); }
+      // S.rooms henüz dolu değilse kısa bekleyip doldur
+      MAPanel._syncPanelState();
+      if (!(S.rooms||[]).length) {
+        setTimeout(() => MAPanel._fillRoomSelect(), 800);
+      }
     }
-    if (window.MAPanel) MAPanel._syncPanelState();
   },
 
   /* ── Modal action stubs (triggered from modal buttons) ── */
@@ -6410,6 +6437,10 @@ const MasterAgent = {
     // Don't auto-react if MA is busy or auto was recently triggered
     if (this._busy) return;
     if (Date.now() - this._lastAutoAt < this._autoCooldown) return;
+    // OOC odada oto-devam yapma
+    const autoRoomIdCheck = window.MAPanel ? MAPanel.getAutoRoomId() : (sentMsg.room_id || S.roomId);
+    const autoRoom = (S.rooms||[]).find(r => String(r.id) === String(autoRoomIdCheck));
+    if (autoRoom && (autoRoom.type === 'ooc' || autoRoom.is_ooc)) return;
     this._lastAutoAt = Date.now();
 
     const charName = sentMsg.char_name || '?';
@@ -6457,6 +6488,9 @@ const MasterAgent = {
     if (this._sentIds?.has(msg.id)) return;
     // MA mesajı mı? (char_name kontrolü — bu da sayılmaz)
     if ((msg.char_name || '').toLowerCase().includes('master agent')) return;
+    // OOC odaysa yoksay — OOC sohbeti rol zannedip cevap vermesin
+    const msgRoom = (S.rooms||[]).find(r => String(r.id) === String(msg.room_id || S.roomId));
+    if (msgRoom && (msgRoom.type === 'ooc' || msgRoom.is_ooc)) return;
 
     // MA bu odada hiç mesaj attı mı? (zaman sınırı YOK — oto-devam açık olduğu sürece aktif)
     let maHasSpoken = false;
@@ -6905,52 +6939,100 @@ const MAPanel = {
     this._saveDirectives();
   },
 
-  // Karakter sohbet penceresini aç
+  // Genel MA sohbetine dön
+  openGeneralChat() {
+    this._activeChat = null;
+    this._updateChatHeader(null);
+    this._renderCharPanel(null);
+    this._render(); // sol panelde seçimi kaldır
+  },
+
+  // Karakter sohbet penceresini aç — sağ panel header + direktif bölümü
   openCharChat(idx) {
     const c = this._chars[idx];
     if (!c) return;
     const key = c.char_id || c.char_name;
     this._activeChat = { idx, key, char: c };
-    this._renderCharChat();
+    this._updateChatHeader(c);
+    this._renderCharPanel(c, idx, key);
+    this._highlightChar(idx);
   },
 
-  _renderCharChat() {
-    const { idx, key, char: c } = this._activeChat;
-    const el = document.getElementById('ma-char-list');
-    if (!el) return;
+  // Sağ panel header'ı güncelle
+  _updateChatHeader(c) {
+    const icon = document.getElementById('ma-chat-header-icon');
+    const name = document.getElementById('ma-chat-header-name');
+    const sub  = document.getElementById('ma-chat-header-sub');
+    const backBtn = document.getElementById('ma-chat-back-btn');
+    const generalDot = document.getElementById('ma-general-active-dot');
+    if (!name) return;
+    if (c) {
+      if (icon) icon.textContent = (c.char_name||'?')[0].toUpperCase();
+      if (icon) { icon.style.background = 'rgba(155,111,212,.3)'; icon.style.font = '700 11px var(--mono)'; icon.style.color = 'var(--pu)'; }
+      name.textContent = c.char_name + (c.char_alias ? ` "${c.char_alias}"` : '');
+      if (sub) sub.textContent = c.org_name || 'Karakter talimatı';
+      if (backBtn) backBtn.style.display = 'flex';
+      if (generalDot) generalDot.style.display = 'none';
+    } else {
+      if (icon) { icon.textContent = '🤖'; icon.style.background = ''; icon.style.font = ''; icon.style.color = ''; }
+      name.textContent = 'Master Agent';
+      if (sub) sub.textContent = 'Genel sohbet';
+      if (backBtn) backBtn.style.display = 'none';
+      if (generalDot) generalDot.style.display = 'block';
+    }
+  },
+
+  // Sağ panelde karakter direktif bölümünü göster/gizle
+  _renderCharPanel(c, idx, key) {
+    let panel = document.getElementById('ma-char-panel');
+    if (!c) {
+      if (panel) panel.style.display = 'none';
+      return;
+    }
+    if (!panel) {
+      // Panel yoksa oluştur — ma-chat ile input arasına ekle
+      panel = document.createElement('div');
+      panel.id = 'ma-char-panel';
+      const chatEl = document.getElementById('ma-chat');
+      if (chatEl && chatEl.parentNode) {
+        chatEl.parentNode.insertBefore(panel, chatEl.nextSibling);
+      }
+    }
+    panel.style.display = 'block';
     const directive = this._getCharDirective(key) || '';
-    el.innerHTML = `
-      <div style="padding:10px 12px;border-bottom:1px solid var(--ln);display:flex;align-items:center;gap:8px">
-        <button onclick="MAPanel._closeCharChat()" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:2px 6px"><i class="fas fa-arrow-left"></i></button>
-        <div style="width:26px;height:26px;border-radius:50%;background:rgba(155,111,212,.25);border:1px solid rgba(155,111,212,.4);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--pu)">${(c.char_name||'?')[0].toUpperCase()}</div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:11px;font-weight:600;color:var(--t1)">${c.char_name}${c.char_alias ? ` <span style="color:var(--t3);font-weight:400">"${c.char_alias}"</span>` : ''}</div>
-          ${c.org_name ? `<div style="font-size:9px;color:var(--t3)">${c.org_name}</div>` : ''}
-        </div>
-      </div>
-      <div style="padding:10px 12px">
-        <div style="font-size:10px;color:var(--t3);margin-bottom:6px;font-weight:600">KARAKTER TALİMATI</div>
-        <div style="font-size:10px;color:var(--t3);margin-bottom:8px;line-height:1.4">
-          MA bu karakteri otomatik devam ettirirken bu talimatı baz alır.<br>
-          <em>Örn: "Soğukkanlı, az konuşur. Asla isim vermez. Silahlı."</em>
-        </div>
-        <textarea id="ma-char-directive-inp"
-          placeholder="Bu karakteri nasıl oynamasını istiyorsun?"
-          style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--ln);border-radius:6px;color:var(--t1);font-size:11px;font-family:var(--sans);padding:8px 10px;resize:vertical;min-height:80px;box-sizing:border-box;outline:none"
-          onkeydown="if(event.key==='Enter'&&event.ctrlKey){MAPanel._saveDirectiveAndSend();event.preventDefault()}"
-        >${directive}</textarea>
-        <div style="display:flex;gap:6px;margin-top:8px">
-          <button onclick="MAPanel._saveDirective()" style="flex:1;padding:5px;background:rgba(155,111,212,.15);border:1px solid rgba(155,111,212,.4);color:var(--pu);border-radius:5px;cursor:pointer;font-size:10px;font-family:var(--sans)">💾 Kaydet</button>
-          <button onclick="MAPanel._saveDirectiveAndSend()" style="flex:1;padding:5px;background:rgba(155,111,212,.3);border:1px solid rgba(155,111,212,.6);color:var(--pu);border-radius:5px;cursor:pointer;font-size:10px;font-family:var(--sans);font-weight:600">💬 Kaydet & MA'ya Söyle</button>
-        </div>
-        ${c.saved ? '' : `<button onclick="event.stopPropagation();MAPanel.saveCharToDB(${idx})" style="width:100%;margin-top:8px;padding:5px;background:rgba(77,184,128,.12);border:1px solid rgba(77,184,128,.3);color:var(--gn);border-radius:5px;cursor:pointer;font-size:10px;font-family:var(--sans)">💾 NYC_DB'ye NPC Olarak Kaydet</button>`}
+    panel.style.cssText = 'border-top:1px solid var(--ln);background:var(--bg1);padding:12px 16px;flex-shrink:0';
+    panel.innerHTML = `
+      <div style="font-size:10px;color:var(--t3);margin-bottom:5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase">Karakter Talimatı</div>
+      <div style="font-size:10px;color:var(--t3);margin-bottom:7px;line-height:1.4">MA bu karakteri oto-devamda oynarken baz alır. <em>Örn: "Soğukkanlı, az konuşur."</em></div>
+      <textarea id="ma-char-directive-inp"
+        placeholder="Bu karakteri nasıl oynamasını istiyorsun?"
+        style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--ln);border-radius:6px;color:var(--t1);font-size:11px;font-family:var(--sans);padding:7px 10px;resize:none;height:64px;box-sizing:border-box;outline:none"
+        onkeydown="if(event.key==='Enter'&&event.ctrlKey){MAPanel._saveDirectiveAndSend();event.preventDefault()}"
+      >${directive}</textarea>
+      <div style="display:flex;gap:6px;margin-top:7px">
+        <button onclick="MAPanel._saveDirective()" style="flex:1;padding:4px;background:rgba(155,111,212,.15);border:1px solid rgba(155,111,212,.4);color:var(--pu);border-radius:5px;cursor:pointer;font-size:10px">💾 Kaydet</button>
+        <button onclick="MAPanel._saveDirectiveAndSend()" style="flex:1;padding:4px;background:rgba(155,111,212,.3);border:1px solid rgba(155,111,212,.6);color:var(--pu);border-radius:5px;cursor:pointer;font-size:10px;font-weight:600">💬 Kaydet & Söyle</button>
+        ${!c.saved ? `<button onclick="MAPanel.saveCharToDB(${idx})" style="flex:1;padding:4px;background:rgba(77,184,128,.12);border:1px solid rgba(77,184,128,.3);color:var(--gn);border-radius:5px;cursor:pointer;font-size:10px">💾 DB'ye Kaydet</button>` : ''}
       </div>
     `;
   },
 
+  // Sol panelde seçili kartı vurgula
+  _highlightChar(idx) {
+    const el = document.getElementById('ma-char-list');
+    if (!el) return;
+    el.querySelectorAll('.npc-card').forEach((card, i) => {
+      card.style.background = (i === idx) ? 'var(--ac-d)' : '';
+      card.style.borderLeft = (i === idx) ? '2px solid var(--pu)' : '';
+    });
+  },
+
+  closeCharChat() {
+    this.openGeneralChat();
+  },
+
   _closeCharChat() {
-    this._activeChat = null;
-    this._render();
+    this.openGeneralChat();
   },
 
   _saveDirective() {
@@ -7047,7 +7129,8 @@ const MAPanel = {
       const delBtn = `<button onclick="event.stopPropagation();MAPanel.removeChar(${i})" title="Listeden kaldır"
           style="font-size:9px;padding:1px 5px;border:1px solid rgba(200,60,60,.3);border-radius:3px;background:rgba(200,60,60,.08);color:#f77;cursor:pointer;margin-left:2px;line-height:1.4">✕</button>`;
       const saveIcon = c.saved ? `<span style="font-size:9px;color:var(--gn);margin-left:2px" title="NYC_DB'ye kaydedildi"><i class="fas fa-check-circle"></i></span>` : '';
-      return `<div class="npc-card" style="padding:8px 10px;display:flex;align-items:flex-start;gap:8px;border-bottom:1px solid var(--ln);cursor:pointer"
+      const isActive = this._activeChat?.idx === i;
+      return `<div class="npc-card" style="padding:8px 10px;display:flex;align-items:flex-start;gap:8px;border-bottom:1px solid var(--ln);cursor:pointer;${isActive ? 'background:var(--ac-d);border-left:2px solid var(--pu);' : ''}"
         onclick="MAPanel.openCharChat(${i})">
         <div style="width:28px;height:28px;border-radius:50%;background:rgba(155,111,212,.25);border:1px solid rgba(155,111,212,.4);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--pu);flex-shrink:0">${initial}</div>
         <div style="flex:1;min-width:0">
@@ -7202,6 +7285,12 @@ const MAPanel = {
   /* ── Sync OAI button state on panel open ──────────── */
   _syncPanelState() {
     this._fillRoomSelect();
+    // Header'ı mevcut duruma göre ayarla
+    if (this._activeChat) {
+      this._updateChatHeader(this._activeChat.char);
+    } else {
+      this._updateChatHeader(null);
+    }
     // OAI button
     const txt = document.getElementById('ma-panel-oai-txt');
     const btn = document.getElementById('ma-panel-oai-btn');
