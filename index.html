@@ -5155,6 +5155,27 @@ Login._start=async function(u){
 
 /* ═══ DM PANEL STYLES ════════════════════════════════ */
 #view-dm{flex-direction:column}
+#view-lore{flex-direction:column;background:var(--bg0)}
+#lk-header{height:var(--hh);background:var(--bg1);border-bottom:1px solid var(--ln);display:flex;align-items:center;gap:12px;padding:0 20px;flex-shrink:0}
+#lk-body{flex:1;display:flex;overflow:hidden;min-height:0}
+#lk-tabs{width:160px;min-width:130px;border-right:1px solid var(--ln);overflow-y:auto;flex-shrink:0;background:var(--bg1)}
+#lk-list{width:230px;min-width:170px;border-right:1px solid var(--ln);overflow-y:auto;flex-shrink:0;background:var(--bg2)}
+#lk-main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+#lk-mode-bar{height:38px;border-bottom:1px solid var(--ln);background:var(--bg2);display:flex;align-items:center;padding:0 14px;gap:8px;flex-shrink:0}
+.lk-mode-btn{padding:4px 12px;border-radius:5px;border:1px solid var(--ln);background:transparent;color:var(--t3);font-size:10px;font-family:var(--mono);cursor:pointer;transition:all .15s}
+.lk-mode-btn.active{background:rgba(80,200,150,.15);border-color:rgba(80,200,150,.5);color:#50c896}
+#lk-content{flex:1;overflow-y:auto;padding:18px 22px;font-size:12px;line-height:1.75;color:var(--t1);font-family:var(--sans)}
+#lk-editor{flex:1;display:none;flex-direction:column;overflow:hidden}
+#lk-editor-title{padding:8px 16px;font-size:11px;font-family:var(--mono);color:var(--t3);border-bottom:1px solid var(--ln);background:var(--bg2);flex-shrink:0}
+#lk-editor-inp{flex:1;background:var(--bg0);border:none;color:var(--t1);font-family:'Courier New',monospace;font-size:12px;line-height:1.6;padding:14px 16px;resize:none;outline:none;overflow-y:auto}
+#lk-chat-area{border-top:1px solid var(--ln);background:var(--bg2);padding:10px 14px;flex-shrink:0}
+#lk-chat-log{max-height:150px;overflow-y:auto;margin-bottom:8px}
+.lk-tab-item{padding:11px 14px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(255,255,255,.04);color:var(--t2);transition:background .1s}
+.lk-tab-item:hover{background:var(--bg2)}
+.lk-tab-item.active{background:rgba(80,200,150,.1);color:#50c896;font-weight:600;border-left:2px solid #50c896}
+.lk-list-item{padding:8px 14px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;gap:6px;border-bottom:1px solid rgba(255,255,255,.04);color:var(--t1);transition:background .1s}
+.lk-list-item:hover{background:var(--bg3)}
+.lk-list-item.active{background:rgba(80,200,150,.12);color:#50c896}
 #dm-header{height:var(--hh);background:var(--bg1);border-bottom:1px solid var(--ln);display:flex;align-items:center;gap:12px;padding:0 20px;flex-shrink:0}
 .dm-brand{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.15em;color:var(--t2);text-transform:uppercase}
 .dm-brand em{color:var(--pu);font-style:normal}
@@ -5228,6 +5249,56 @@ Login._start=async function(u){
 .ma-inline{background:var(--bg3);padding:1px 5px;border-radius:3px;font-family:var(--mono);font-size:11px;color:var(--pu)}
 
 </style>
+
+<!-- Lore Keeper — Tam Sayfa Panel -->
+<div class="view" id="view-lore" style="display:none">
+  <div id="lk-header">
+    <span style="font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.15em;color:var(--t2);text-transform:uppercase"><i class="fas fa-scroll" style="margin-right:6px;color:#50c896"></i>NYC<span style="color:#50c896">_</span>LORE</span>
+    <div class="adm-sep"></div>
+    <div class="adm-st">
+      <div class="sdot" style="background:#50c896"></div>
+      <span style="color:#50c896;font-family:var(--mono);font-size:11px">Lore Keeper</span>
+    </div>
+    <div class="adm-sep"></div>
+    <span style="font-family:var(--mono);font-size:10px;color:var(--t3)" id="lk-status">—</span>
+    <div class="adm-spc"></div>
+    <button class="adm-btn" style="font-size:10px" onclick="LoreKeeper.importMD()" title="Markdown'dan içe aktar">📥 İçe Aktar</button>
+    <button class="adm-btn" style="font-size:10px" onclick="LoreKeeper.newChar()">+ Karakter</button>
+    <button class="adm-btn" style="font-size:10px;background:rgba(80,200,150,.12);border-color:rgba(80,200,150,.4);color:#50c896" onclick="LoreKeeper.save()" id="lk-save-btn">💾 Kaydet</button>
+    <button class="adm-btn" onclick="LoreKeeper.close()"><i class="fas fa-arrow-left"></i> RP'ye Dön</button>
+  </div>
+  <div id="lk-body">
+    <!-- Sol: Bölüm sekmeleri -->
+    <div id="lk-tabs"></div>
+    <!-- Orta: İtem listesi -->
+    <div id="lk-list"></div>
+    <!-- Sağ: İçerik / Editör + AI Chat -->
+    <div id="lk-main">
+      <!-- Mod çubuğu -->
+      <div id="lk-mode-bar">
+        <span style="font-size:10px;color:var(--t3);font-family:var(--mono)" id="lk-doc-title">(belge seçilmedi)</span>
+        <div style="flex:1"></div>
+        <button class="lk-mode-btn active" id="lk-btn-read" data-mode="read" onclick="LoreKeeper.setMode('read')">👁 Oku</button>
+        <button class="lk-mode-btn" id="lk-btn-edit" data-mode="edit" onclick="LoreKeeper.setMode('edit')">✏️ Düzenle</button>
+      </div>
+      <!-- Okuma alanı -->
+      <div id="lk-content"></div>
+      <!-- Editör alanı -->
+      <div id="lk-editor">
+        <textarea id="lk-editor-inp" placeholder="Markdown içerik buraya…"></textarea>
+      </div>
+      <!-- AI Sohbet -->
+      <div id="lk-chat-area">
+        <div id="lk-chat-log"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="lk-inp" type="text" placeholder="Bu lore hakkında bir şey sor… (Enter)" style="flex:1;background:var(--bg3);border:1px solid var(--ln);color:var(--t1);border-radius:6px;padding:7px 12px;font-size:11px;font-family:var(--sans);outline:none" onkeydown="if(event.key==='Enter')LoreKeeper.ask()">
+          <button onclick="LoreKeeper.ask()" style="background:#50c896;border:none;color:#000;border-radius:6px;padding:7px 14px;cursor:pointer;font-size:11px;font-family:var(--mono);font-weight:700">Sor</button>
+          <button onclick="LoreKeeper.clearChat()" style="background:var(--bg3);border:1px solid var(--ln);color:var(--t3);border-radius:6px;padding:7px 10px;cursor:pointer;font-size:10px" title="Sohbeti temizle">🗑️</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Master Agent Panel View -->
 <div class="view" id="view-dm" style="display:none">
@@ -5328,8 +5399,7 @@ Login._start=async function(u){
         <button class="adm-btn" style="font-size:10px;border-color:rgba(74,143,226,.4);color:var(--ac)" onclick="Session.startDialog()" title="Yeni RP Sessionu başlat"><i class="fas fa-film"></i> 🎬 Session</button>
         <button id="ma-panel-auto-toggle" class="adm-btn" style="font-size:10px" onclick="MAPanel._toggleAuto()" title="MA otomatik sahne devam ettirme"><i class="fas fa-robot"></i> <span id="ma-panel-auto-txt">🤖 Oto: AÇ</span></button>
         <button id="ma-panel-oai-btn" class="adm-btn" style="font-size:10px" onclick="MAPanel._toggleOAI()" title="Observer AI aç/kapat"><span id="ma-panel-oai-txt">Observer AI: OFF</span></button>
-        <button class="adm-btn" style="font-size:10px;border-color:rgba(74,143,226,.4);color:var(--ac)" onclick="KanonEditor.open()" title="Kanon Bilgi Tabanını düzenle"><i class="fas fa-book"></i> 📚 Kanon</button>
-        <button class="adm-btn" style="font-size:10px;border-color:rgba(80,200,150,.4);color:#50c896" onclick="LoreKeeper.open()" title="Lore Keeper — karakter, olay, timeline arşivi"><i class="fas fa-scroll"></i> 📖 Lore</button>
+        <button class="adm-btn" style="font-size:10px;border-color:rgba(80,200,150,.4);color:#50c896" onclick="LoreKeeper.open()" title="Lore Keeper — kanon arşivi, editör ve AI sohbet"><i class="fas fa-scroll"></i> 📖 Lore Keeper</button>
         <button class="adm-btn" style="font-size:10px;border-color:rgba(155,111,212,.4);color:var(--pu)" onclick="MAPanel.loadMAChars()"><i class="fas fa-sync-alt"></i></button>
       </div>
 
@@ -5364,69 +5434,8 @@ Login._start=async function(u){
   </div>
 </div>
 
-<!-- Kanon Bilgi Tabanı Modal -->
-<div class="mbd hidden" id="m-kanon">
-  <div class="mbox" style="max-width:980px;width:96vw;height:92vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
-    <!-- Header -->
-    <div class="mhd" style="padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0">
-      <span style="font-size:15px">📚</span>
-      <span style="font-weight:700;font-size:14px;color:var(--t0)">Kanon Bilgi Tabanı</span>
-      <span style="font-size:10px;color:var(--t3);font-family:var(--mono);margin-left:4px" id="kanon-status">—</span>
-      <div style="flex:1"></div>
-      <button onclick="KanonEditor.importMD()" style="background:var(--bg3);border:1px solid var(--ln);color:var(--t2);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:11px" title="Markdown dosyasından içe aktar">📥 İçe Aktar</button>
-      <button onclick="KanonEditor.newChar()" style="background:var(--bg3);border:1px solid var(--ln);color:var(--t2);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:11px">+ Karakter</button>
-      <button onclick="KanonEditor.save()" style="background:var(--pu);border:none;color:#fff;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:11px;font-family:var(--mono)">💾 Kaydet</button>
-      <button onclick="KanonEditor.close()" style="background:var(--bg3);border:1px solid var(--ln);color:var(--t2);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:11px">✕</button>
-    </div>
-    <!-- Two-panel body -->
-    <div style="display:flex;flex:1;overflow:hidden;min-height:0">
-      <!-- Left: doc list -->
-      <div id="kanon-list" style="width:210px;min-width:160px;border-right:1px solid var(--ln);overflow-y:auto;flex-shrink:0;background:var(--bg1);padding:6px 0"></div>
-      <!-- Right: editor -->
-      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0">
-        <div id="kanon-doc-title" style="padding:8px 16px;font-size:11px;font-family:var(--mono);color:var(--t3);border-bottom:1px solid var(--ln);background:var(--bg2);flex-shrink:0">(belge seçilmedi)</div>
-        <textarea id="kanon-editor-inp"
-          style="flex:1;width:100%;background:var(--bg0);border:none;color:var(--t1);font-family:'Courier New',monospace;font-size:12px;line-height:1.6;padding:14px 16px;resize:none;outline:none;overflow-y:auto;box-sizing:border-box"
-          placeholder="Sol panelden bir bölüm seçin veya 📥 İçe Aktar ile Markdown yükleyin..."></textarea>
-      </div>
-    </div>
-  </div>
-</div>
+<!-- Lore Keeper — Tam Sayfa Panel (view-lore) -->
 
-<!-- Lore Keeper Modal -->
-<div class="mbd hidden" id="m-lore">
-  <div class="mbox" style="max-width:1060px;width:97vw;height:93vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
-    <!-- Header -->
-    <div class="mhd" style="padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0">
-      <span style="font-size:16px">📖</span>
-      <span style="font-weight:700;font-size:14px;color:var(--t0)">Lore Keeper</span>
-      <span style="font-size:10px;color:var(--t3);font-family:var(--mono);margin-left:4px" id="lk-status">—</span>
-      <div style="flex:1"></div>
-      <button onclick="LoreKeeper.close()" style="background:var(--bg3);border:1px solid var(--ln);color:var(--t2);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:11px">✕</button>
-    </div>
-    <!-- Three-column body -->
-    <div style="display:flex;flex:1;overflow:hidden;min-height:0">
-      <!-- Left: section tabs -->
-      <div id="lk-tabs" style="width:150px;min-width:120px;border-right:1px solid var(--ln);overflow-y:auto;flex-shrink:0;background:var(--bg1);padding:8px 0"></div>
-      <!-- Center: item list -->
-      <div id="lk-list" style="width:220px;min-width:160px;border-right:1px solid var(--ln);overflow-y:auto;flex-shrink:0;background:var(--bg2);padding:6px 0"></div>
-      <!-- Right: content + chat -->
-      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0">
-        <!-- Doc view -->
-        <div id="lk-content" style="flex:1;overflow-y:auto;padding:16px 20px;font-size:12px;line-height:1.7;color:var(--t1);font-family:var(--sans);min-height:0"></div>
-        <!-- AI chat strip -->
-        <div style="border-top:1px solid var(--ln);background:var(--bg2);padding:10px 14px;flex-shrink:0">
-          <div id="lk-chat-log" style="max-height:140px;overflow-y:auto;margin-bottom:8px;font-size:11px;line-height:1.6;font-family:var(--sans)"></div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input id="lk-inp" type="text" placeholder="Bu konuda bir şey sor… (Enter)" style="flex:1;background:var(--bg3);border:1px solid var(--ln);color:var(--t1);border-radius:6px;padding:7px 12px;font-size:11px;font-family:var(--sans);outline:none" onkeydown="if(event.key==='Enter')LoreKeeper.ask()">
-            <button onclick="LoreKeeper.ask()" style="background:var(--pu);border:none;color:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;font-size:11px;font-family:var(--mono)">Sor</button>
-            <button onclick="LoreKeeper.clearChat()" style="background:var(--bg3);border:1px solid var(--ln);color:var(--t3);border-radius:6px;padding:7px 10px;cursor:pointer;font-size:10px" title="Sohbeti temizle">🗑️</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- NPC Trigger Modal -->
 <div class="mbd hidden" id="m-npc-trigger">
@@ -5791,9 +5800,11 @@ const KanonDB = {
 
     // Sabit bölümler
     const fixedSections = [
-      { heads: ['## 1.', '## 2.', '## 3.', '## 4.'], key: 'meta', label: '📋 Kılavuz & Dünya', type: 'meta' },
+      { heads: ['## 0.', '## 1.', '## 2.', '## 3.', '## 4.'], key: 'meta', label: '📋 Kılavuz & Dünya', type: 'meta' },
       { heads: ['## 5.'], key: 'current_state', label: '🔴 Son Durum', type: 'current_state' },
-      { heads: ['## 10.', '## 11.', '## 12.', '## 13.'], key: 'timeline', label: '📅 Zaman & İplikler', type: 'timeline' },
+      { heads: ['## 10.'], key: 'timeline', label: '📅 Zaman Çizelgesi', type: 'timeline' },
+      { heads: ['## 11.', '## 12.'], key: 'plot_threads', label: '🧵 Açık İplikler & Notlar', type: 'plot_threads' },
+      { heads: ['## 13.'], key: 'relations', label: '🔗 İlişki Matrisi', type: 'relations' },
     ];
 
     // Karakter profilleri (## 6. altındaki ### başlıkları)
@@ -5830,14 +5841,13 @@ const KanonDB = {
       }
 
       if (inChars) {
-        if (isH3 || (isH2 && /^## 6\./.test(line))) {
-          if (isH3) {
-            // "#### Alt grup başlığı" gibi değil, ### karakter başlığı
-            currentCharName = line.replace(/^###\s*/, '').replace(/\s*\(.*\)/, '').trim();
-            if (!buffers['chars_all'][currentCharName]) buffers['chars_all'][currentCharName] = [];
-          }
-          if (!isH3) buffers['chars_all']['__header__'] = (buffers['chars_all']['__header__'] || []).concat(line);
-        } else if (currentCharName) {
+        const isH4 = /^#### /.test(line);
+        if (isH4) {
+          // #### Karakter Adı (Oyuncu) — gerçek karakter başlığı
+          currentCharName = line.replace(/^####\s*/, '').replace(/\s*\([^)]*\)\s*$/, '').replace(/\s*—.*$/, '').trim();
+          if (!buffers['chars_all'][currentCharName]) buffers['chars_all'][currentCharName] = [];
+        } else if (currentCharName && !isH2) {
+          // ### grup başlığı veya içerik satırı — aktif karakterin buffer'ına ekle
           buffers['chars_all'][currentCharName].push(line);
         }
       } else if (inFactions) {
@@ -5857,10 +5867,9 @@ const KanonDB = {
 
     // Karakterleri ayrı ayrı kaydet (her karakter kendi dokümanı)
     for (const [charName, charLines] of Object.entries(buffers['chars_all'])) {
-      if (charName === '__header__') continue;
       if (!charLines.length) continue;
       const slug = 'chars/' + this._slug(charName);
-      const content = `### ${charName}\n${charLines.join('\n')}`.trim();
+      const content = `#### ${charName}\n${charLines.join('\n')}`.trim();
       sections.push({ key: slug, label: charName, type: 'char', content });
     }
 
@@ -6085,38 +6094,142 @@ const KanonEditor = {
 window.KanonEditor = KanonEditor;
 
 /* ═══════════════════════════════════════════════════════════════════
-   LORE KEEPER — NYC_RP Kanon Arşivi Kütüphanecisi
-   Üç panel: Bölüm sekmeler | İtem listesi | İçerik + AI sohbet
+   LORE KEEPER — NYC_RP Kanon Arşivi Kütüphanecisi (Tam Sayfa Panel)
+   Bölüm sekmeler | İtem listesi | İçerik (oku/düzenle) + AI sohbet
    Gemini 2.0 Flash ile soru-cevap (sadece ilgili dokümanlar context)
 ════════════════════════════════════════════════════════════════════ */
 const LoreKeeper = {
-  _activeSection: null, // 'chars' | 'timeline' | 'factions' | 'world' | 'current' | 'meta'
+  _activeSection: null,
   _activeKey: null,
-  _chatHistory: [], // [{role, text}]
+  _chatHistory: [],
   _busy: false,
+  _mode: 'read', // 'read' | 'edit'
 
-  // Bölüm tanımları
   _sections: [
+    { id: 'current',  icon: '🔴', label: 'Son Durum',     key: 'current_state' },
     { id: 'chars',    icon: '👤', label: 'Karakterler',   prefix: 'chars/' },
-    { id: 'current',  icon: '📊', label: 'Güncel Durum',  key: 'current_state' },
-    { id: 'timeline', icon: '📅', label: 'Timeline',      key: 'timeline' },
     { id: 'factions', icon: '🏛️', label: 'Gruplar',       key: 'factions_all' },
-    { id: 'world',    icon: '🗺️', label: 'Dünya / Lore',  key: 'world' },
+    { id: 'relations',icon: '🔗', label: 'İlişkiler',     key: 'relations' },
+    { id: 'timeline', icon: '📅', label: 'Timeline',      key: 'timeline' },
+    { id: 'threads',  icon: '🧵', label: 'Açık İplikler', key: 'plot_threads' },
+    { id: 'world',    icon: '🗺️', label: 'Mekanlar',      key: 'world' },
     { id: 'meta',     icon: '📋', label: 'Rehber',        key: 'meta' },
   ],
 
   async open() {
-    document.getElementById('m-lore')?.classList.remove('hidden');
+    // Switch to lore view
+    document.querySelectorAll('.view').forEach(v => v.style.display = 'none');
+    const vl = document.getElementById('view-lore');
+    if (vl) vl.style.display = 'flex';
     this._setStatus('Yükleniyor…');
     await KanonDB.loadList().catch(() => {});
     this._renderTabs();
-    // Default: karakterler
     await this.selectSection(this._activeSection || 'chars');
     this._setStatus('Hazır');
   },
 
   close() {
-    document.getElementById('m-lore')?.classList.add('hidden');
+    document.getElementById('view-lore').style.display = 'none';
+    document.getElementById('view-rp').style.display = 'flex';
+  },
+
+  setMode(mode) {
+    this._mode = mode;
+    const readEl = document.getElementById('lk-content');
+    const editEl = document.getElementById('lk-editor');
+    const modeBtns = document.querySelectorAll('.lk-mode-btn');
+    if (mode === 'edit') {
+      if (readEl) readEl.style.display = 'none';
+      if (editEl) editEl.style.display = 'flex';
+    } else {
+      if (readEl) readEl.style.display = '';
+      if (editEl) editEl.style.display = 'none';
+    }
+    modeBtns.forEach(b => {
+      b.classList.toggle('active', b.dataset.mode === mode);
+    });
+  },
+
+  async save() {
+    if (!this._activeKey) { toast('Önce bir doküman seç', 'warn'); return; }
+    const inp = document.getElementById('lk-editor-inp');
+    if (!inp) return;
+    const txt = inp.value;
+    this._setStatus('Kaydediliyor…');
+    try {
+      await KanonDB.saveDoc(this._activeKey, txt);
+      await KanonDB.loadList().catch(() => {});
+      toast('Kaydedildi ✓', 'success');
+      this._setStatus('Kaydedildi');
+      // Refresh read view
+      const wc = txt.trim().split(/\s+/).length;
+      this._renderMarkdown(txt);
+      this.setMode('read');
+    } catch(e) {
+      toast('Kayıt hatası: ' + e.message, 'error');
+      this._setStatus('Hata');
+    }
+  },
+
+  importMD() {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = '.md,.txt';
+    input.onchange = async () => {
+      const file = input.files[0]; if (!file) return;
+      this._setStatus('İçe aktarılıyor…');
+      const text = await file.text();
+      try {
+        const count = await KanonDB.importFromMarkdown(text);
+        await KanonDB.loadList().catch(() => {});
+        this._renderTabs();
+        await this.selectSection('chars');
+        toast(`${count} bölüm içe aktarıldı`, 'success');
+        this._setStatus('Hazır');
+      } catch(e) {
+        toast('Hata: ' + e.message, 'error');
+        this._setStatus('Hata');
+      }
+    };
+    input.click();
+  },
+
+  async newChar() {
+    const name = prompt('Yeni karakter adı:');
+    if (!name?.trim()) return;
+    const slug = name.trim().toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9\-]/g,'');
+    const key = 'chars/' + slug;
+    const template = `# ${name.trim()}\n\n## Temel Bilgiler\n- **İsim:** ${name.trim()}\n- **Yaş:** \n- **Meslek:** \n\n## Kişilik\n\n## Geçmiş\n\n## İlişkiler\n`;
+    this._setStatus('Oluşturuluyor…');
+    try {
+      await KanonDB.saveDoc(key, template);
+      await KanonDB.loadList().catch(() => {});
+      this._renderTabs();
+      await this.selectSection('chars');
+      await this.openDoc(key);
+      this.setMode('edit');
+      const inp = document.getElementById('lk-editor-inp');
+      if (inp) inp.value = template;
+      toast(`${name} oluşturuldu`, 'success');
+    } catch(e) {
+      toast('Hata: ' + e.message, 'error');
+    }
+    this._setStatus('Hazır');
+  },
+
+  async deleteDoc(key) {
+    if (!confirm(`"${key}" silinsin mi?`)) return;
+    this._setStatus('Siliniyor…');
+    try {
+      await KanonDB.deleteDoc(key);
+      await KanonDB.loadList().catch(() => {});
+      this._activeKey = null;
+      this._renderTabs();
+      await this.selectSection(this._activeSection || 'chars');
+      toast('Silindi', 'success');
+    } catch(e) {
+      toast('Hata: ' + e.message, 'error');
+    }
+    this._setStatus('Hazır');
   },
 
   _setStatus(txt) {
@@ -6129,7 +6242,7 @@ const LoreKeeper = {
     if (!el) return;
     el.innerHTML = this._sections.map(s => {
       const active = this._activeSection === s.id;
-      return `<div onclick="LoreKeeper.selectSection('${s.id}')" style="padding:10px 14px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(255,255,255,.04);${active ? 'background:var(--ac-d);color:var(--ac);font-weight:600;border-left:2px solid var(--ac)' : 'color:var(--t2)'}" onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background='${active ? 'var(--ac-d)' : ''}'">
+      return `<div onclick="LoreKeeper.selectSection('${s.id}')" class="lk-tab-item${active ? ' active' : ''}">
         <span>${s.icon}</span><span>${s.label}</span>
       </div>`;
     }).join('');
@@ -6163,7 +6276,7 @@ const LoreKeeper = {
     }
     el.innerHTML = chars.map(c => {
       const active = this._activeKey === c.key;
-      return `<div onclick="LoreKeeper.openDoc('${c.key}')" style="padding:8px 14px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;gap:6px;border-bottom:1px solid rgba(255,255,255,.04);${active ? 'background:rgba(80,200,150,.12);color:#50c896' : 'color:var(--t1)'}" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='${active ? 'rgba(80,200,150,.12)' : ''}'">
+      return `<div onclick="LoreKeeper.openDoc('${c.key}')" class="lk-list-item${active ? ' active' : ''}">
         👤 <span style="flex:1">${c.label || c.key.replace('chars/','')}</span>
         <span style="font-size:9px;color:var(--t3)">${c.word_count ? c.word_count + 'k' : ''}</span>
       </div>`;
@@ -6182,17 +6295,27 @@ const LoreKeeper = {
     if (this._activeSection === 'chars') this._renderCharList();
     this._showContent('<div style="color:var(--t3);font-size:11px;padding:12px">Yükleniyor…</div>');
     this._setStatus('Yükleniyor…');
+    // Update mode bar title
+    const titleEl = document.getElementById('lk-doc-title');
+    if (titleEl) titleEl.textContent = key.replace('chars/','').replace(/_/g,' ');
     const doc = await KanonDB.loadDoc(key).catch(() => null);
     if (!doc) {
-      this._showContent('<div style="color:var(--t3);font-size:12px;padding:20px">Bu bölüm henüz içe aktarılmamış.<br><small>📥 Kanon → İçe Aktar</small></div>');
+      this._showContent('<div style="color:var(--t3);font-size:12px;padding:20px">Bu bölüm henüz içe aktarılmamış.<br><small>📥 İçe Aktar butonunu kullan</small></div>');
       this._setStatus('İçerik yok');
+      const inp = document.getElementById('lk-editor-inp');
+      if (inp) inp.value = '';
       return;
     }
     this._renderMarkdown(doc.content || '');
+    const inp = document.getElementById('lk-editor-inp');
+    if (inp) inp.value = doc.content || '';
     this._setStatus(`${doc.word_count ? doc.word_count + ' kelime' : 'Yüklendi'}`);
-    // Clear chat context when switching doc
+    // Back to read mode when switching doc
+    this.setMode('read');
+    // Clear chat context
     this._chatHistory = [];
-    document.getElementById('lk-chat-log').innerHTML = '';
+    const log = document.getElementById('lk-chat-log');
+    if (log) log.innerHTML = '';
   },
 
   _renderMarkdown(md) {
