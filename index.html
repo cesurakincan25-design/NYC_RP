@@ -567,6 +567,12 @@ body{font-family:var(--sans);background:var(--bg0);color:var(--t0);font-size:14p
     <div class="ai-pill" id="ai-pill" onclick="Adm&&Adm.openPanel()" title="Observer AI Panelini Aç">
       <div class="ai-dot"></div><span id="ai-pill-txt">Observer AI: OFF</span>
     </div>
+    <div class="ai-pill" onclick="DMPanel.open()" title="MA Panel — Master Agent tam ekran" style="color:var(--pu);border-color:rgba(155,111,212,.3)">
+      <i class="fas fa-robot" style="font-size:9px"></i><span>MA Panel</span>
+    </div>
+    <div class="ai-pill" onclick="LoreKeeper.open()" title="Lore Keeper — Kanon Arşivi" style="color:#50c896;border-color:rgba(80,200,150,.3)">
+      <i class="fas fa-scroll" style="font-size:9px"></i><span>Lore Keeper</span>
+    </div>
     <div class="sb-user" onclick="Login._userMenu(event)" title="Profil / Çıkış">
       <div class="ava-sm" id="sess-ava"><span id="sess-ini">?</span><div class="online-dot"></div></div>
       <div style="flex:1;min-width:0">
@@ -3894,16 +3900,9 @@ const SessionProgress = {
 
 /* ═══ ADMIN ════════════════════════════════════════════ */
 const Adm={
-  tab_:'summaries',feed:{summaries:[],incidents:[],memories:[],flags:[]},authed:false,
-  openPanel(){
-    if(this.authed){this._show();return;}
-    document.getElementById('adm-pw').value='';document.getElementById('adm-pw-err').style.display='none';
-    OM('m-admin-login');setTimeout(()=>document.getElementById('adm-pw').focus(),100);
-  },
-  checkPw(){
-    if(document.getElementById('adm-pw').value===ADM_PASS){this.authed=true;CM('m-admin-login');this._show();}
-    else{document.getElementById('adm-pw-err').style.display='block';document.getElementById('adm-pw').value='';document.getElementById('adm-pw').focus();}
-  },
+  tab_:'summaries',feed:{summaries:[],incidents:[],memories:[],flags:[]},authed:true,
+  openPanel(){this._show();},
+  checkPw(){this.authed=true;CM('m-admin-login');this._show();},
   _show(){
     document.getElementById('view-rp').classList.remove('active');
     document.getElementById('view-admin').classList.add('active');
@@ -5609,13 +5608,13 @@ if (typeof window.DMPanel !== 'object' || !window.DMPanel) window.DMPanel = {};
 Object.assign(window.DMPanel, {
   /* ── Close MA panel → back to RP ── */
   close() {
-    document.getElementById('view-dm').style.display = 'none';
+    document.querySelectorAll('.view').forEach(v => v.style.display = 'none');
     document.getElementById('view-rp').style.display = 'flex';
   },
 
   /* ── Open MA panel (full-screen) ── */
   open() {
-    document.getElementById('view-rp').style.display = 'none';
+    document.querySelectorAll('.view').forEach(v => v.style.display = 'none');
     document.getElementById('view-dm').style.display = 'flex';
     if (window.MAPanel) {
       MAPanel._loadLS(); // localStorage'dan önce yükle — hızlı görünüm
