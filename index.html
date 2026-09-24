@@ -7244,6 +7244,40 @@ const LoreKeeper = {
     if (modal) modal.style.display = 'none';
   },
 
+  // ── Kanon markdown'ı section'lara parse et ───────────────────────────
+  _parseKanonSections(md) {
+    if(!md) return {};
+    const sections = {};
+    // ## Başlık veya ### Başlık formatlarını yakala
+    const parts = md.split(/\n(?=#{1,3}\s)/);
+    for(const part of parts) {
+      const m = part.match(/^#{1,3}\s+(.+)\n([\s\S]*)/);
+      if(m) {
+        const key = m[1].trim().toLowerCase()
+          .replace(/ö/g,'o').replace(/ü/g,'u').replace(/ş/g,'s')
+          .replace(/ı/g,'i').replace(/ğ/g,'g').replace(/ç/g,'c')
+          .replace(/[^a-z0-9]/g,'_').replace(/__+/g,'_').replace(/^_|_$/g,'');
+        sections[key] = m[2].trim();
+        // Türkçe alias'lar
+        const aliases = {
+          'ozet':'summary','ozet_':'summary',
+          'arka_plan':'background','gecmis':'background',
+          'kisilik':'personality','karakter':'personality',
+          'hedefler':'goals','motivasyon':'goals','hedefler_motivasyon':'goals',
+          'gizli':'secrets','gizli_bilgiler':'secrets','sirlar':'secrets',
+          'etiketler':'tags','tags':'tags'
+        };
+        if(aliases[key]) sections[aliases[key]] = m[2].trim();
+      }
+    }
+    // Ana başlığı da al (ilk ### veya # satır, bölüm yoksa)
+    if(!sections.summary) {
+      const firstBlock = md.replace(/^#{1,3}\s+.+\n/, '').trim();
+      if(firstBlock) sections._intro = firstBlock;
+    }
+    return sections;
+  },
+
   async _aiSyncLore() {
     const dbId     = this._modalDbId;
     const kanonKey = this._modalKey;
@@ -7251,9 +7285,30 @@ const LoreKeeper = {
     if(!dc) { if(typeof toast==='function') toast('NYC_DB kaydı bulunamadı','warn'); return; }
 
     const btn = document.getElementById('lk-cm-sync-btn');
-    if(btn) { btn.disabled=true; btn.textContent='⏳ Doldurulıyor…'; }
+    if(btn) { btn.disabled=true; btn.textContent='⏳ Senkronize ediliyor…'; }
 
-    // ── Deterministik lore üretimi (API gerektirmez) ──────────────────────
+    // ── Önce KanonDB'den oku ─────────────────────────────────────────────
+    let summary='', background='', personality='', goals='', secrets='';
+    let tags=[];
+    let fromKanon = false;
+
+    try {
+      const kanonDoc = kanonKey ? await KanonDB.loadDoc(kanonKey) : null;
+      if(kanonDoc?.content?.trim()) {
+        const sec = this._parseKanonSections(kanonDoc.content);
+        summary     = sec.summary     || sec.ozet     || sec._intro || '';
+        background  = sec.background  || sec.arka_plan|| sec.gecmis || '';
+        personality = sec.personality || sec.kisilik  || '';
+        goals       = sec.goals       || sec.hedefler || sec.motivasyon || '';
+        secrets     = sec.secrets     || sec.gizli    || sec.sirlar    || '';
+        // Tags: kanon belgesindeki etiketler varsa al, yoksa üret
+        const rawTagStr = sec.tags || sec.etiketler || '';
+        tags = rawTagStr ? rawTagStr.split(/[,\n]/).map(t=>t.trim()).filter(Boolean) : [];
+        fromKanon = !!(summary || background);
+      }
+    } catch(ke) { console.warn('[LoreSync] Kanon okuma hatası:', ke.message); }
+
+    // ── Eksik alanları deterministik olarak doldur (fallback) ────────────
     const orgs = (dc.organizations||[dc.organization||'']).filter(Boolean)
       .map(oid => S.oi.get(oid)?.name || oid);
     const rels = (dc.relationships||[]).map(r => {
@@ -7261,62 +7316,58 @@ const LoreKeeper = {
       return t ? { name: t.name, type: r.type } : null;
     }).filter(Boolean);
 
-    // Summary
-    const parts = [];
-    if(dc.name)        parts.push(dc.name);
-    if(dc.alias)       parts.push(`(${dc.alias})`);
-    if(dc.nationality) parts.push(`— ${dc.nationality} kökenli`);
-    if(dc.age)         parts.push(`${dc.age} yaşında`);
-    const orgStr = orgs.length ? orgs.join(', ') : 'bağımsız';
-    let summary = parts.join(' ');
-    summary += `, NYC'de ${orgStr} çevrelerinde faaliyet gösteren`;
-    if(dc.threatLevel && dc.threatLevel !== 'Low') summary += ` ${dc.threatLevel.toLowerCase()} tehdit seviyeli`;
-    summary += ' bir isim.';
-    if(dc.status === 'Deceased') summary += ` Artık hayatta değil${dc.statusNote ? ' — ' + dc.statusNote : ''}.`;
-    else if(dc.status === 'Inactive') summary += ` Şu an pasif durumda${dc.statusNote ? ' — ' + dc.statusNote : ''}.`;
-
-    // Background — story'den al
-    const background = dc.story || '';
-
-    // Personality
-    const persTraits = [];
-    if(['Critical','High'].includes(dc.threatLevel)) persTraits.push('hesaplı ve tehlikeli');
-    else if(dc.threatLevel === 'Medium') persTraits.push('temkinli');
-    else if(dc.threatLevel === 'Low')    persTraits.push('alçak profilli');
-    if(['Hot','Burning'].includes(dc.heatLevel)) persTraits.push('dikkat çeken, ısınan biri');
-    else if(dc.heatLevel === 'Clean')             persTraits.push('radarların altında kalmayı tercih eden');
-    if(dc.isClassified) persTraits.push('kimliği gizli tutulan');
-    const personality = persTraits.length
-      ? `${dc.name||'Bu karakter'} ${persTraits.join(', ')} biri olarak tanımlanıyor.` : '';
-
-    // Goals
-    const goalParts = [];
-    if(orgs.length) goalParts.push(`${orgs.join(' ve ')} içindeki konumunu korumak`);
-    if(rels.length) {
+    if(!summary) {
+      const parts = [];
+      if(dc.name)        parts.push(dc.name);
+      if(dc.alias)       parts.push(`(${dc.alias})`);
+      if(dc.nationality) parts.push(`— ${dc.nationality} kökenli`);
+      if(dc.age)         parts.push(`${dc.age} yaşında`);
+      const orgStr = orgs.length ? orgs.join(', ') : 'bağımsız';
+      summary = parts.join(' ');
+      summary += `, NYC'de ${orgStr} çevrelerinde faaliyet gösteren`;
+      if(dc.threatLevel && dc.threatLevel !== 'Low') summary += ` ${dc.threatLevel.toLowerCase()} tehdit seviyeli`;
+      summary += ' bir isim.';
+      if(dc.status === 'Deceased') summary += ` Artık hayatta değil${dc.statusNote ? ' — ' + dc.statusNote : ''}.`;
+      else if(dc.status === 'Inactive') summary += ` Şu an pasif durumda${dc.statusNote ? ' — ' + dc.statusNote : ''}.`;
+    }
+    if(!background) background = dc.story || '';
+    if(!personality) {
+      const persTraits = [];
+      if(['Critical','High'].includes(dc.threatLevel)) persTraits.push('hesaplı ve tehlikeli');
+      else if(dc.threatLevel === 'Medium') persTraits.push('temkinli');
+      else if(dc.threatLevel === 'Low')    persTraits.push('alçak profilli');
+      if(['Hot','Burning'].includes(dc.heatLevel)) persTraits.push('dikkat çeken, ısınan biri');
+      else if(dc.heatLevel === 'Clean')             persTraits.push('radarların altında kalmayı tercih eden');
+      if(dc.isClassified) persTraits.push('kimliği gizli tutulan');
+      personality = persTraits.length ? `${dc.name||'Bu karakter'} ${persTraits.join(', ')} biri olarak tanımlanıyor.` : '';
+    }
+    if(!goals) {
+      const goalParts = [];
+      if(orgs.length) goalParts.push(`${orgs.join(' ve ')} içindeki konumunu korumak`);
       const allies  = rels.filter(r=>['ally','partner','friend','associate'].some(k=>r.type.toLowerCase().includes(k)));
       const enemies = rels.filter(r=>['enemy','rival','target','hostile'].some(k=>r.type.toLowerCase().includes(k)));
       if(allies.length)  goalParts.push(`${allies.map(r=>r.name).join(', ')} ile iş birliği`);
       if(enemies.length) goalParts.push(`${enemies.map(r=>r.name).join(', ')} ile hesaplaşma`);
+      goals = goalParts.length ? goalParts.join('; ') + '.' : '';
     }
-    const goals = goalParts.length ? goalParts.join('; ') + '.' : '';
+    if(!secrets) {
+      secrets = dc.isClassified
+        ? `${dc.name||'Karakterin'} gerçek kimliği ve arka planı sınıflandırılmış bilgi kapsamında.`
+        : (dc.statusNote && dc.status !== 'Active' ? `Durum notu: ${dc.statusNote}` : '');
+    }
+    if(!tags.length) {
+      const rawTags = [];
+      if(dc.nationality) rawTags.push(dc.nationality.toLowerCase());
+      orgs.forEach(o => rawTags.push(o.toLowerCase().replace(/\s+/g,'-')));
+      if(dc.threatLevel && dc.threatLevel !== 'Low') rawTags.push(dc.threatLevel.toLowerCase());
+      if(dc.heatLevel   && dc.heatLevel   !== 'Clean') rawTags.push(dc.heatLevel.toLowerCase());
+      if(dc.status === 'Deceased') rawTags.push('deceased');
+      if(dc.isClassified)          rawTags.push('classified');
+      rels.slice(0,2).forEach(r => rawTags.push(r.type.toLowerCase().replace(/\s+/g,'-')));
+      tags = [...new Set(rawTags)].slice(0,8);
+    }
 
-    // Secrets
-    const secrets = dc.isClassified
-      ? `${dc.name||'Karakterin'} gerçek kimliği ve arka planı sınıflandırılmış bilgi kapsamında.`
-      : (dc.statusNote && dc.status !== 'Active' ? `Durum notu: ${dc.statusNote}` : '');
-
-    // Tags
-    const rawTags = [];
-    if(dc.nationality) rawTags.push(dc.nationality.toLowerCase());
-    orgs.forEach(o => rawTags.push(o.toLowerCase().replace(/\s+/g,'-')));
-    if(dc.threatLevel && dc.threatLevel !== 'Low') rawTags.push(dc.threatLevel.toLowerCase());
-    if(dc.heatLevel   && dc.heatLevel   !== 'Clean') rawTags.push(dc.heatLevel.toLowerCase());
-    if(dc.status === 'Deceased') rawTags.push('deceased');
-    if(dc.isClassified)          rawTags.push('classified');
-    rels.slice(0,2).forEach(r => rawTags.push(r.type.toLowerCase().replace(/\s+/g,'-')));
-    const tags = [...new Set(rawTags)].slice(0,8);
-
-    const updatedLore = { summary, background, personality, goals, secrets, tags, lastUpdated: new Date().toISOString() };
+    const updatedLore = { summary, background, personality, goals, secrets, tags, lastUpdated: new Date().toISOString(), _source: fromKanon ? 'kanon' : 'auto' };
 
     // ── Firebase'e yaz (nyc_db/main) ─────────────────────────────────────
     try {
@@ -7359,7 +7410,7 @@ const LoreKeeper = {
 
     // Modal'ı yenile
     await this._openCharModal(kanonKey, dbId);
-    if(btn) { btn.disabled=false; btn.textContent='✅ Senkronize Edildi!'; }
+    if(btn) { btn.disabled=false; btn.textContent= fromKanon ? '✅ Kanon\'dan aktarıldı!' : '✅ Otomatik dolduruldu!'; }
     setTimeout(()=>{ if(btn) btn.textContent='✨ Senkronize Et'; }, 3000);
   },
 
