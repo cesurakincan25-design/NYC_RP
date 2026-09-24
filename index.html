@@ -1508,6 +1508,9 @@ const RP={
     // Gerçek zamanlı oda listesi ve OAI durum dinleyicileri
     RT.watchRooms();
     RT.watchOAIState();
+    // ── NYC_DB REALTIME BRIDGE ────────────────────────────────────────────
+    // nyc_db/main dökümanını dinle — değişince S.chars/S.orgs/S.vehicles güncelle
+    DBBridge.start();
   },
   _dfRooms(){
     S.rooms=[
@@ -2063,6 +2066,59 @@ const RP={
       box?.classList.remove('nsfw-active');
     }
   },
+};
+
+/* ═══ NYC_DB ↔ NYC_RP BRIDGE ════════════════════════════ */
+const DBBridge = {
+  _unsub: null,
+
+  // NYC_DB'yi realtime dinle — S.chars/S.orgs/S.vehicles güncelle
+  start() {
+    if(this._unsub) return; // zaten çalışıyor
+    try {
+      const fs = window._fbFirestore;
+      const db = window._fbDb;
+      if(!fs || !db) { console.warn('[DBBridge] Firebase hazır değil'); return; }
+      const { doc, onSnapshot } = fs;
+      const ref = doc(db, 'nyc_db', 'main');
+      this._unsub = onSnapshot(ref, snap => {
+        if(!snap.exists()) return;
+        const d = snap.data()?.data;
+        if(!d) return;
+        const chars = d.characters || [];
+        const orgs  = d.organizations || [];
+        const vehs  = d.vehicles || [];
+        // Değişiklik var mı kontrol et (karakter sayısı veya son güncelleme)
+        if(chars.length !== S.chars.length ||
+           JSON.stringify(chars.map(c=>c.id+c.name+(c.lore?.lastUpdated||''))) !==
+           JSON.stringify(S.chars.map(c=>c.id+c.name+(c.lore?.lastUpdated||'')))) {
+          S.chars = chars;
+          S.orgs  = orgs;
+          S._db   = d;
+          // Index'leri yeniden oluştur
+          S.ci.clear(); S.cni.clear(); S.oi.clear();
+          chars.forEach(c => {
+            S.ci.set(c.id, c);
+            if(c.name)  S.cni.set(c.name.toLowerCase(), c.id);
+            if(c.alias) S.cni.set(c.alias.toLowerCase(), c.id);
+          });
+          orgs.forEach(o => S.oi.set(o.id, o));
+          console.log('[DBBridge] NYC_DB sync:', chars.length, 'karakter,', orgs.length, 'org');
+          // LoreKeeper açıksa char grid'i yenile
+          if(typeof LoreKeeper !== 'undefined' && LoreKeeper._charData?.length) {
+            LoreKeeper._charData = [];
+            LoreKeeper._renderCharCards?.();
+          }
+        }
+      }, err => console.warn('[DBBridge] onSnapshot hata:', err.message));
+    } catch(e) {
+      console.warn('[DBBridge] start hata:', e.message);
+    }
+  },
+
+  stop() {
+    if(this._unsub) { this._unsub(); this._unsub = null; }
+  }
 };
 
 /* ═══ REALTIME (Firebase onSnapshot) ════════════════════ */
@@ -5282,6 +5338,7 @@ Login._start=async function(u){
       <div style="height:1px;background:var(--ln);flex-shrink:0"></div>
       <div style="padding:10px 14px;display:flex;gap:8px;flex-shrink:0">
         <button id="lk-cm-edit-btn" style="flex:1;padding:7px 0;font-size:10px;background:var(--bg3);border:1px solid var(--ln);color:var(--t2);border-radius:6px;cursor:pointer;font-family:var(--mono)" onclick="LoreKeeper._closeCharModal();LoreKeeper._openCharEdit(LoreKeeper._modalKey)">✏️ Kanon'u Düzenle</button>
+        <button id="lk-cm-sync-btn" style="flex:1;padding:7px 0;font-size:10px;background:linear-gradient(135deg,rgba(124,58,237,.2),rgba(74,143,226,.2));border:1px solid rgba(124,58,237,.5);color:#a78bfa;border-radius:6px;cursor:pointer;font-family:var(--mono)" onclick="LoreKeeper._aiSyncLore()">✨ Senkronize Et</button>
         <button id="lk-cm-db-btn" style="flex:1;padding:7px 0;font-size:10px;background:rgba(80,200,150,.12);border:1px solid rgba(80,200,150,.4);color:#50c896;border-radius:6px;cursor:pointer;font-family:var(--mono)" onclick="LoreKeeper._openInDB(LoreKeeper._modalDbId)">🗂 NYC_DB'de Aç</button>
       </div>
     </div>
@@ -7138,8 +7195,18 @@ const LoreKeeper = {
         const content = doc?.content || '';
         if (bodyEl) {
           if (!content.trim()) {
-            bodyEl.innerHTML = `${orgLine}<div style="color:var(--t3)">Kanon belgesi henüz yazılmamış.</div>` +
-              (dc?.story ? `<div style="margin-top:10px;padding:10px;background:var(--bg3);border-radius:6px;font-size:10px;color:var(--t2)"><strong style="color:var(--t3);font-size:9px;letter-spacing:.1em">NYC_DB ÖZET</strong><br>${dc.story.slice(0,500).replace(/</g,'&lt;')}${dc.story.length>500?'…':''}</div>` : '');
+            // Kanon yok — NYC_DB lore alanlarını göster
+            const lore = dc?.lore || {};
+            const loreSections = [
+              lore.summary     ? `<div style="margin-bottom:10px">${lore.summary.replace(/</g,'&lt;')}</div>` : '',
+              lore.background  ? `<div style="font-size:9px;color:#50c896;font-weight:700;margin:10px 0 3px;text-transform:uppercase;letter-spacing:.08em">Arka Plan</div><div>${lore.background.replace(/</g,'&lt;')}</div>` : '',
+              lore.personality ? `<div style="font-size:9px;color:#50c896;font-weight:700;margin:10px 0 3px;text-transform:uppercase;letter-spacing:.08em">Kişilik</div><div>${lore.personality.replace(/</g,'&lt;')}</div>` : '',
+              lore.goals       ? `<div style="font-size:9px;color:#50c896;font-weight:700;margin:10px 0 3px;text-transform:uppercase;letter-spacing:.08em">Hedefler</div><div>${lore.goals.replace(/</g,'&lt;')}</div>` : '',
+              (lore.tags||[]).length ? `<div style="margin-top:8px">${lore.tags.map(t=>`<span style="background:var(--bg3);border:1px solid var(--ln);border-radius:3px;padding:1px 5px;font-size:9px;color:var(--t2);margin-right:3px">${t}</span>`).join('')}</div>` : '',
+            ].filter(Boolean).join('');
+            const storyFallback = dc?.story ? `<div style="margin-top:10px;padding:10px;background:var(--bg3);border-radius:6px;font-size:10px;color:var(--t2)"><strong style="color:var(--t3);font-size:9px;letter-spacing:.1em">NYC_DB ÖZET</strong><br>${dc.story.slice(0,500).replace(/</g,'&lt;')}${dc.story.length>500?'…':''}</div>` : '';
+            bodyEl.innerHTML = `${orgLine}${loreSections || storyFallback || '<div style="color:var(--t3)">Kanon belgesi henüz yazılmamış.</div>'}` +
+              (loreSections && storyFallback ? storyFallback : '');
           } else {
             // Render markdown (sections as readable summary)
             let html = content
@@ -7158,16 +7225,142 @@ const LoreKeeper = {
       } catch(e) {
         if (bodyEl) bodyEl.innerHTML = `${orgLine}<div style="color:#f77">Yüklenemedi: ${e.message}</div>`;
       }
-    } else if (dc?.story && bodyEl) {
-      bodyEl.innerHTML = `${orgLine}<div style="font-size:10px;color:var(--t3);margin-bottom:6px">NYC_DB özeti:</div>${dc.story.slice(0,600).replace(/</g,'&lt;')}${dc.story.length>600?'…':''}`;
     } else if (bodyEl) {
-      bodyEl.innerHTML = `${orgLine}<div style="color:var(--t3)">Bu karakter için içerik yok.</div>`;
+      const lore = dc?.lore || {};
+      const loreSections = [
+        lore.summary     ? `<div style="margin-bottom:10px">${lore.summary.replace(/</g,'&lt;')}</div>` : '',
+        lore.background  ? `<div style="font-size:9px;color:#50c896;font-weight:700;margin:10px 0 3px;text-transform:uppercase;letter-spacing:.08em">Arka Plan</div><div>${lore.background.replace(/</g,'&lt;')}</div>` : '',
+        lore.personality ? `<div style="font-size:9px;color:#50c896;font-weight:700;margin:10px 0 3px;text-transform:uppercase;letter-spacing:.08em">Kişilik</div><div>${lore.personality.replace(/</g,'&lt;')}</div>` : '',
+        lore.goals       ? `<div style="font-size:9px;color:#50c896;font-weight:700;margin:10px 0 3px;text-transform:uppercase;letter-spacing:.08em">Hedefler</div><div>${lore.goals.replace(/</g,'&lt;')}</div>` : '',
+        (lore.tags||[]).length ? `<div style="margin-top:8px">${lore.tags.map(t=>`<span style="background:var(--bg3);border:1px solid var(--ln);border-radius:3px;padding:1px 5px;font-size:9px;color:var(--t2);margin-right:3px">${t}</span>`).join('')}</div>` : '',
+      ].filter(Boolean).join('');
+      const storyFallback = dc?.story ? `<div style="margin-top:10px;padding:10px;background:var(--bg3);border-radius:6px;font-size:10px;color:var(--t2)"><strong style="color:var(--t3);font-size:9px;letter-spacing:.1em">NYC_DB ÖZET</strong><br>${dc.story.slice(0,500).replace(/</g,'&lt;')}${dc.story.length>500?'…':''}</div>` : '';
+      bodyEl.innerHTML = `${orgLine}${loreSections || storyFallback || '<div style="color:var(--t3)">Bu karakter için içerik yok.</div>'}`;
     }
   },
 
   _closeCharModal() {
     const modal = document.getElementById('lk-char-modal');
     if (modal) modal.style.display = 'none';
+  },
+
+  async _aiSyncLore() {
+    const dbId     = this._modalDbId;
+    const kanonKey = this._modalKey;
+    const dc = dbId ? S.ci.get(dbId) : null;
+    if(!dc) { if(typeof toast==='function') toast('NYC_DB kaydı bulunamadı','warn'); return; }
+
+    const btn = document.getElementById('lk-cm-sync-btn');
+    if(btn) { btn.disabled=true; btn.textContent='⏳ Doldurulıyor…'; }
+
+    // ── Deterministik lore üretimi (API gerektirmez) ──────────────────────
+    const orgs = (dc.organizations||[dc.organization||'']).filter(Boolean)
+      .map(oid => S.oi.get(oid)?.name || oid);
+    const rels = (dc.relationships||[]).map(r => {
+      const t = S.ci.get(r.targetId);
+      return t ? { name: t.name, type: r.type } : null;
+    }).filter(Boolean);
+
+    // Summary
+    const parts = [];
+    if(dc.name)        parts.push(dc.name);
+    if(dc.alias)       parts.push(`(${dc.alias})`);
+    if(dc.nationality) parts.push(`— ${dc.nationality} kökenli`);
+    if(dc.age)         parts.push(`${dc.age} yaşında`);
+    const orgStr = orgs.length ? orgs.join(', ') : 'bağımsız';
+    let summary = parts.join(' ');
+    summary += `, NYC'de ${orgStr} çevrelerinde faaliyet gösteren`;
+    if(dc.threatLevel && dc.threatLevel !== 'Low') summary += ` ${dc.threatLevel.toLowerCase()} tehdit seviyeli`;
+    summary += ' bir isim.';
+    if(dc.status === 'Deceased') summary += ` Artık hayatta değil${dc.statusNote ? ' — ' + dc.statusNote : ''}.`;
+    else if(dc.status === 'Inactive') summary += ` Şu an pasif durumda${dc.statusNote ? ' — ' + dc.statusNote : ''}.`;
+
+    // Background — story'den al
+    const background = dc.story || '';
+
+    // Personality
+    const persTraits = [];
+    if(['Critical','High'].includes(dc.threatLevel)) persTraits.push('hesaplı ve tehlikeli');
+    else if(dc.threatLevel === 'Medium') persTraits.push('temkinli');
+    else if(dc.threatLevel === 'Low')    persTraits.push('alçak profilli');
+    if(['Hot','Burning'].includes(dc.heatLevel)) persTraits.push('dikkat çeken, ısınan biri');
+    else if(dc.heatLevel === 'Clean')             persTraits.push('radarların altında kalmayı tercih eden');
+    if(dc.isClassified) persTraits.push('kimliği gizli tutulan');
+    const personality = persTraits.length
+      ? `${dc.name||'Bu karakter'} ${persTraits.join(', ')} biri olarak tanımlanıyor.` : '';
+
+    // Goals
+    const goalParts = [];
+    if(orgs.length) goalParts.push(`${orgs.join(' ve ')} içindeki konumunu korumak`);
+    if(rels.length) {
+      const allies  = rels.filter(r=>['ally','partner','friend','associate'].some(k=>r.type.toLowerCase().includes(k)));
+      const enemies = rels.filter(r=>['enemy','rival','target','hostile'].some(k=>r.type.toLowerCase().includes(k)));
+      if(allies.length)  goalParts.push(`${allies.map(r=>r.name).join(', ')} ile iş birliği`);
+      if(enemies.length) goalParts.push(`${enemies.map(r=>r.name).join(', ')} ile hesaplaşma`);
+    }
+    const goals = goalParts.length ? goalParts.join('; ') + '.' : '';
+
+    // Secrets
+    const secrets = dc.isClassified
+      ? `${dc.name||'Karakterin'} gerçek kimliği ve arka planı sınıflandırılmış bilgi kapsamında.`
+      : (dc.statusNote && dc.status !== 'Active' ? `Durum notu: ${dc.statusNote}` : '');
+
+    // Tags
+    const rawTags = [];
+    if(dc.nationality) rawTags.push(dc.nationality.toLowerCase());
+    orgs.forEach(o => rawTags.push(o.toLowerCase().replace(/\s+/g,'-')));
+    if(dc.threatLevel && dc.threatLevel !== 'Low') rawTags.push(dc.threatLevel.toLowerCase());
+    if(dc.heatLevel   && dc.heatLevel   !== 'Clean') rawTags.push(dc.heatLevel.toLowerCase());
+    if(dc.status === 'Deceased') rawTags.push('deceased');
+    if(dc.isClassified)          rawTags.push('classified');
+    rels.slice(0,2).forEach(r => rawTags.push(r.type.toLowerCase().replace(/\s+/g,'-')));
+    const tags = [...new Set(rawTags)].slice(0,8);
+
+    const updatedLore = { summary, background, personality, goals, secrets, tags, lastUpdated: new Date().toISOString() };
+
+    // ── Firebase'e yaz (nyc_db/main) ─────────────────────────────────────
+    try {
+      const fs = window._fbFirestore;
+      const db = window._fbDb;
+      if(fs && db) {
+        const { doc, getDoc, setDoc } = fs;
+        const ref = doc(db, 'nyc_db', 'main');
+        const snap = await getDoc(ref);
+        if(snap.exists()) {
+          const mainData = snap.data();
+          const chars = mainData.data?.characters || [];
+          const idx = chars.findIndex(x => x.id === dbId);
+          if(idx >= 0) {
+            chars[idx] = { ...chars[idx], lore: updatedLore };
+            mainData.data.characters = chars;
+            await setDoc(ref, mainData);
+            dc.lore = updatedLore;
+            S.ci.set(dbId, dc);
+          }
+        }
+      }
+    } catch(fe) { console.warn('[LoreSync] Firebase yazma hatası:', fe.message); }
+
+    // ── Kanon doc'a özet ekle / güncelle ─────────────────────────────────
+    if(kanonKey && summary) {
+      try {
+        const existing = await KanonDB.loadDoc(kanonKey);
+        const oldContent = existing?.content || '';
+        const newSection = `## Özet\n${summary}${background ? '\n\n' + background : ''}`;
+        let newContent;
+        if(oldContent.includes('## Özet')) {
+          newContent = oldContent.replace(/## Özet[\s\S]*?(?=\n## |\n---|\n# |$)/, newSection + '\n\n');
+        } else {
+          newContent = newSection + '\n\n' + oldContent;
+        }
+        await KanonDB.saveDoc(kanonKey, newContent.trim());
+      } catch(ke) { console.warn('[LoreSync] Kanon güncelleme hatası:', ke.message); }
+    }
+
+    // Modal'ı yenile
+    await this._openCharModal(kanonKey, dbId);
+    if(btn) { btn.disabled=false; btn.textContent='✅ Senkronize Edildi!'; }
+    setTimeout(()=>{ if(btn) btn.textContent='✨ Senkronize Et'; }, 3000);
   },
 
   _renderListSingle(sec) {
