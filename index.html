@@ -3409,7 +3409,14 @@ const CharCard = {
 
   openInDB(id, type) {
     const base = 'https://cesurakincan25-design.github.io/NYC_DB/';
-    window.open(base + '?type=' + type + '&id=' + id, '_blank');
+    // Karakter için #char=ID, araç için #vehicle=ID vb. hash kullan
+    // NYC_DB engine.js'i bu hash'i okuyup UI.openModal(id) çağırıyor
+    const hashKey = (type === 'character' || type === 'char') ? 'char'
+                  : (type === 'vehicle')      ? 'vehicle'
+                  : (type === 'organization') ? 'org'
+                  : (type === 'property')     ? 'property'
+                  : 'char';
+    window.open(base + '#' + hashKey + '=' + encodeURIComponent(id), '_blank');
   }
 };
 window.CharCard = CharCard;
