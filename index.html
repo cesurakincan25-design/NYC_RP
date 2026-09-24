@@ -3763,7 +3763,9 @@ const OAI={
         return `[${t}${rpT}] ${m.char_name}${m.char_alias?` "${m.char_alias}"`:''}${m.org_name?` [${m.org_name}]`:''}: ${body}`;
       }).join('\n');
       const worldCtx=this._worldSnapshot?`\nWORLD CONTEXT (NYC_DB — read only, for reference):\n${this._worldSnapshot}\n`:'';
-      const prompt=`You are NYC_DB Observer AI. Observe only. Return ONLY valid JSON.${worldCtx}\nMESSAGE FORMAT NOTE: *text* = IC emote/action (purple italic), (( text )) = OOC comment (ignore for IC analysis), **text** = bold, _text_ = italic, ~~text~~ = strikethrough, [color|text] = colored text, @name = player mention. Strip formatting marks when extracting character dialogue/actions for summaries.\nINVOLVED CHARACTERS:\n${charLines||'(unknown)'}\nINVOLVED ORGANIZATIONS:\n${orgLines||'(none)'}\nTRANSCRIPT (${messages.length} messages):\n${tr}\nRespond:{"session_summary":{"title":"","summary":"","involved_chars":[],"involved_orgs":[],"significance":"low"},"incidents":[{"title":"","incident_type":"confrontation","severity":"low","description":"","location_name":"","involved_chars":[],"involved_orgs":[],"source_confidence":0.0}],"character_memories":[{"char_id":"","char_name":"","memory_type":"event","title":"","content":"","emotional_tag":"neutral","importance":50,"about_chars":[]}],"relationship_changes":[{"entity_a_id":"","entity_a_name":"","entity_a_type":"character","entity_b_id":"","entity_b_name":"","entity_b_type":"character","change_type":"neutral","direction":"mutual","trust_delta":0,"description":""}],"flags":{"requires_admin_review":false,"review_reason":""}}`;
+      const _kanonTxt=window.KanonEditor?._getForPrompt(true)||'';
+      const kanonObsCtx=_kanonTxt?`\nCANON KNOWLEDGE BASE (character relationships, factions, current state — use for context when analyzing RP messages):\n${_kanonTxt}\n`:'';
+      const prompt=`You are NYC_DB Observer AI. Observe only. Return ONLY valid JSON.${worldCtx}${kanonObsCtx}\nMESSAGE FORMAT NOTE: *text* = IC emote/action (purple italic), (( text )) = OOC comment (ignore for IC analysis), **text** = bold, _text_ = italic, ~~text~~ = strikethrough, [color|text] = colored text, @name = player mention. Strip formatting marks when extracting character dialogue/actions for summaries.\nINVOLVED CHARACTERS:\n${charLines||'(unknown)'}\nINVOLVED ORGANIZATIONS:\n${orgLines||'(none)'}\nTRANSCRIPT (${messages.length} messages):\n${tr}\nRespond:{"session_summary":{"title":"","summary":"","involved_chars":[],"involved_orgs":[],"significance":"low"},"incidents":[{"title":"","incident_type":"confrontation","severity":"low","description":"","location_name":"","involved_chars":[],"involved_orgs":[],"source_confidence":0.0}],"character_memories":[{"char_id":"","char_name":"","memory_type":"event","title":"","content":"","emotional_tag":"neutral","importance":50,"about_chars":[]}],"relationship_changes":[{"entity_a_id":"","entity_a_name":"","entity_a_type":"character","entity_b_id":"","entity_b_name":"","entity_b_type":"character","change_type":"neutral","direction":"mutual","trust_delta":0,"description":""}],"flags":{"requires_admin_review":false,"review_reason":""}}`;
       // Shared Gemini REST — Firebase AI Logic artık kullanılmıyor
       const parsed = await _geminiGenerate(prompt, { json:true, temperature:0.2, topP:0.8, maxOutputTokens:2048 });
       if(!this.CFG.DRY_RUN){
@@ -4594,6 +4596,8 @@ document.addEventListener('DOMContentLoaded',()=>{
   // Fallback: login sonrası input görünür olunca yeniden dene
   const obs=new MutationObserver(()=>{const i=document.getElementById('msg-input');if(i&&!i._wired)_wireInput();});
   obs.observe(document.body,{childList:true,subtree:true});
+  // Kanon bilgi tabanını arka planda önyükle
+  _fbReady().then(()=>{ if(window.KanonEditor) KanonEditor._load(); }).catch(()=>{});
 });
 
 /* ═══ PLAYER PROFILE SYSTEM ══════════════════════════════ */
@@ -5323,6 +5327,7 @@ Login._start=async function(u){
         <button class="adm-btn" style="font-size:10px;border-color:rgba(74,143,226,.4);color:var(--ac)" onclick="Session.startDialog()" title="Yeni RP Sessionu başlat"><i class="fas fa-film"></i> 🎬 Session</button>
         <button id="ma-panel-auto-toggle" class="adm-btn" style="font-size:10px" onclick="MAPanel._toggleAuto()" title="MA otomatik sahne devam ettirme"><i class="fas fa-robot"></i> <span id="ma-panel-auto-txt">🤖 Oto: AÇ</span></button>
         <button id="ma-panel-oai-btn" class="adm-btn" style="font-size:10px" onclick="MAPanel._toggleOAI()" title="Observer AI aç/kapat"><span id="ma-panel-oai-txt">Observer AI: OFF</span></button>
+        <button class="adm-btn" style="font-size:10px;border-color:rgba(74,143,226,.4);color:var(--ac)" onclick="KanonEditor.open()" title="Kanon Bilgi Tabanını düzenle"><i class="fas fa-book"></i> 📚 Kanon</button>
         <button class="adm-btn" style="font-size:10px;border-color:rgba(155,111,212,.4);color:var(--pu)" onclick="MAPanel.loadMAChars()"><i class="fas fa-sync-alt"></i></button>
       </div>
 
@@ -5354,6 +5359,27 @@ Login._start=async function(u){
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Kanon Bilgi Tabanı Modal -->
+<div class="mbd hidden" id="m-kanon">
+  <div class="mbox" style="max-width:860px;width:95vw;height:90vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
+    <div class="mhd" style="padding:14px 18px;display:flex;align-items:center;gap:10px;flex-shrink:0">
+      <span style="font-size:16px">📚</span>
+      <span style="font-weight:700;font-size:14px;color:var(--t0)">Kanon Bilgi Tabanı</span>
+      <span style="font-size:10px;color:var(--t3);font-family:var(--mono);margin-left:4px" id="kanon-status">—</span>
+      <div style="flex:1"></div>
+      <button onclick="KanonEditor.save()" style="background:var(--pu);border:none;color:#fff;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:11px;font-family:var(--mono)">💾 Kaydet</button>
+      <button onclick="KanonEditor.close()" style="background:var(--bg3);border:1px solid var(--ln);color:var(--t2);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:11px">✕</button>
+    </div>
+    <div style="padding:0 18px 6px;font-size:10px;color:var(--t3);font-family:var(--mono);flex-shrink:0;border-bottom:1px solid var(--ln)">
+      Bu belge MA ve Observer AI'a her çağrıda otomatik olarak eklenir. Markdown formatında düzenleyebilirsin.
+      <span style="color:var(--am);margin-left:8px">⚠️ Büyük belgelerde sadece Bölüm 1 ve 5 AI'ya gönderilir (maliyet optimizasyonu).</span>
+    </div>
+    <textarea id="kanon-editor-inp"
+      style="flex:1;width:100%;background:var(--bg0);border:none;color:var(--t1);font-family:'Courier New',monospace;font-size:12px;line-height:1.6;padding:16px 18px;resize:none;outline:none;overflow-y:auto;box-sizing:border-box"
+      placeholder="Kanon bilgi tabanı buraya yüklenecek..."></textarea>
   </div>
 </div>
 
@@ -5602,6 +5628,119 @@ Object.assign(window.DMPanel, {
    Fires ONLY when user sends a message in the MA chat tab.
    Zero background polling — billing-efficient.
 ════════════════════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════════════════
+   KANON EDİTÖR — Firebase'den yükle, içinde düzenle, kaydet.
+   MA ve Observer sistem promptuna otomatik enjekte edilir.
+════════════════════════════════════════════════════════ */
+const KanonEditor = {
+  _content: '',        // bellek içi metin
+  _loaded: false,      // Firebase'den yüklendi mi
+  _dirty: false,       // kaydedilmemiş değişiklik var mı
+  _FIREBASE_DOC: 'settings/kanon_bilgi',
+
+  /* Firebase'den yükle */
+  async _load() {
+    try {
+      const {db, fs} = await _fbReady();
+      const ref = fs.doc(db, 'settings', 'kanon_bilgi');
+      const snap = await fs.getDoc(ref);
+      if (snap.exists()) {
+        this._content = snap.data().content || '';
+        this._loaded = true;
+        this._setStatus(`Son güncelleme: ${snap.data().updated_at ? new Date(snap.data().updated_at).toLocaleString('tr-TR') : '—'}`);
+      } else {
+        this._content = '';
+        this._loaded = true;
+        this._setStatus('Firebase\'de henüz kayıt yok');
+      }
+    } catch(e) {
+      console.warn('[Kanon] Yükleme hatası:', e);
+      this._setStatus('⚠️ Yükleme hatası: ' + e.message);
+    }
+  },
+
+  /* Firebase'e kaydet */
+  async save() {
+    const inp = document.getElementById('kanon-editor-inp');
+    if (!inp) return;
+    this._content = inp.value;
+    this._setStatus('Kaydediliyor…');
+    try {
+      const {db, fs} = await _fbReady();
+      const ref = fs.doc(db, 'settings', 'kanon_bilgi');
+      await fs.setDoc(ref, {
+        content: this._content,
+        updated_at: new Date().toISOString(),
+        char_count: this._content.length,
+        word_count: this._content.split(/\s+/).filter(Boolean).length
+      });
+      this._dirty = false;
+      this._setStatus(`✅ Kaydedildi — ${this._content.split(/\s+/).filter(Boolean).length.toLocaleString()} kelime`);
+      toast('Kanon bilgi tabanı kaydedildi', 'success');
+    } catch(e) {
+      console.warn('[Kanon] Kaydetme hatası:', e);
+      this._setStatus('⚠️ Kaydetme hatası: ' + e.message);
+      toast('Kaydetme hatası: ' + e.message, 'error');
+    }
+  },
+
+  /* Modal aç */
+  async open() {
+    document.getElementById('m-kanon')?.classList.remove('hidden');
+    if (!this._loaded) {
+      this._setStatus('Yükleniyor…');
+      await this._load();
+    }
+    const inp = document.getElementById('kanon-editor-inp');
+    if (inp) {
+      inp.value = this._content;
+      inp.addEventListener('input', () => { this._dirty = true; }, { once: false });
+    }
+  },
+
+  /* Modal kapat */
+  close() {
+    if (this._dirty) {
+      if (!confirm('Kaydedilmemiş değişiklikler var. Çıkmak istediğine emin misin?')) return;
+    }
+    document.getElementById('m-kanon')?.classList.add('hidden');
+    this._dirty = false;
+  },
+
+  _setStatus(txt) {
+    const el = document.getElementById('kanon-status');
+    if (el) el.textContent = txt;
+  },
+
+  /* Prompt enjeksiyonu — MA için tam belge, Observer için Bölüm 1+5 özeti */
+  _getForPrompt(observerMode = false) {
+    if (!this._content || this._content.trim().length < 50) return '';
+    if (!observerMode) {
+      // MA: tam belge (Gemini 2.5'in context'i kaldırır)
+      return this._content;
+    }
+    // Observer: sadece Bölüm 1 (Kılavuz) ve Bölüm 5 (Son Durum) — daha az token
+    const lines = this._content.split('\n');
+    const result = [];
+    let capture = false;
+    let sectionDepth = 0;
+    for (const line of lines) {
+      // Bölüm 1 veya 5 başlığı
+      if (/^## [15]\./.test(line) || /^## 1\b/.test(line) || /^## 5\b/.test(line)) {
+        capture = true; sectionDepth = 0;
+      }
+      // Başka bir ## bölümü başlarsa dur
+      else if (/^## [^15]/.test(line) && capture) {
+        capture = false;
+      }
+      if (capture) result.push(line);
+    }
+    return result.join('\n').slice(0, 12000); // max 12k char Observer için
+  },
+};
+window.KanonEditor = KanonEditor;
+
 const MasterAgent = {
   _history: [],          // {role:'user'|'model', parts:[{text}]}
   _busy: false,
@@ -5656,6 +5795,7 @@ const MasterAgent = {
     const now = new Date().toLocaleString('tr-TR');
     const rpTime = (S.roomId ? RpTime.get(S.roomId) : null) || '—';
     const worldSnap = OAI?._worldSnapshot || '(henüz oluşturulmadı)';
+    const kanonCtx = window.KanonEditor?._getForPrompt() || '';
     const dmCtx = (typeof window.DMEngine !== 'undefined' && DMEngine.getContext)
       ? DMEngine.getContext().toString().slice(0, 2000)
       : '(DM Engine bağlı değil)';
@@ -5828,6 +5968,8 @@ const MasterAgent = {
       '  SAVE_NPC / SAVE_VEHICLE / SAVE_PROP → yeni kayıt oluşturma',
       'Bir karakterin araçlarını, geçmişini, ilişkilerini, olaylardaki rolünü öğrenmek için QUERY_DB kullan.',
       'Rol yönetimi kararları almadan önce ilgili verileri sorgula.',
+      '',
+      ...(kanonCtx ? ['', '== KANON BİLGİ TABANI ==', kanonCtx] : []),
       '',
       '== DM BAĞLAMI ==',
       dmCtx,
