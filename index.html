@@ -5252,6 +5252,33 @@ Login._start=async function(u){
 
 <!-- Lore Keeper — Tam Sayfa Panel -->
 <div class="view" id="view-lore" style="display:none">
+  <!-- Character detail modal -->
+  <div id="lk-char-modal" style="display:none;position:absolute;inset:0;z-index:200;background:rgba(0,0,0,.75);backdrop-filter:blur(4px);align-items:center;justify-content:center" onclick="if(event.target===this)LoreKeeper._closeCharModal()">
+    <div style="background:var(--bg1);border:1px solid rgba(80,200,150,.35);border-radius:12px;width:min(520px,92vw);max-height:80vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 0 40px rgba(80,200,150,.12)">
+      <div id="lk-cm-head" style="display:flex;gap:0;flex-shrink:0">
+        <img id="lk-cm-img" style="width:110px;height:130px;object-fit:cover;border-radius:12px 0 0 0;display:none">
+        <div id="lk-cm-img-ph" style="width:110px;height:130px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:40px;border-radius:12px 0 0 0;flex-shrink:0">👤</div>
+        <div style="flex:1;padding:14px 16px;display:flex;flex-direction:column;gap:5px;min-width:0">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+            <div>
+              <div id="lk-cm-name" style="font-size:15px;color:var(--t0);font-weight:700;line-height:1.2"></div>
+              <div id="lk-cm-alias" style="font-size:11px;color:var(--t3);margin-top:2px"></div>
+            </div>
+            <button onclick="LoreKeeper._closeCharModal()" style="background:none;border:none;color:var(--t3);font-size:16px;cursor:pointer;padding:0;flex-shrink:0">✕</button>
+          </div>
+          <div id="lk-cm-badges" style="display:flex;gap:5px;flex-wrap:wrap"></div>
+          <div id="lk-cm-player" style="font-size:10px;color:var(--t3)"></div>
+        </div>
+      </div>
+      <div style="height:1px;background:var(--ln);flex-shrink:0"></div>
+      <div id="lk-cm-body" style="flex:1;overflow-y:auto;padding:14px 16px;font-size:11px;color:var(--t1);line-height:1.6"></div>
+      <div style="height:1px;background:var(--ln);flex-shrink:0"></div>
+      <div style="padding:10px 14px;display:flex;gap:8px;flex-shrink:0">
+        <button id="lk-cm-edit-btn" style="flex:1;padding:7px 0;font-size:10px;background:var(--bg3);border:1px solid var(--ln);color:var(--t2);border-radius:6px;cursor:pointer;font-family:var(--mono)" onclick="LoreKeeper._closeCharModal();LoreKeeper._openCharEdit(LoreKeeper._modalKey)">✏️ Kanon'u Düzenle</button>
+        <button id="lk-cm-db-btn" style="flex:1;padding:7px 0;font-size:10px;background:rgba(80,200,150,.12);border:1px solid rgba(80,200,150,.4);color:#50c896;border-radius:6px;cursor:pointer;font-family:var(--mono)" onclick="LoreKeeper._openInDB(LoreKeeper._modalDbId)">🗂 NYC_DB'de Aç</button>
+      </div>
+    </div>
+  </div>
   <div id="lk-header">
     <span style="font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.15em;color:var(--t2);text-transform:uppercase"><i class="fas fa-scroll" style="margin-right:6px;color:#50c896"></i>NYC<span style="color:#50c896">_</span>LORE</span>
     <div class="adm-sep"></div>
@@ -6853,7 +6880,9 @@ const LoreKeeper = {
   // ── Char grid state ──────────────────────────────────────────
   _charData: [],      // merged list (built once per open)
   _charDescMap: {},   // kanonKey → first-line description
-  _charFilter: { q: '', org: '', type: 'all' },
+  _charFilter: { q: '', org: '', player: 'all' },
+  _modalKey: null,    // active modal kanonKey
+  _modalDbId: null,   // active modal dbChar id
 
   async _renderCharCards() {
     const kanonChars = (KanonDB._listCache || []).filter(d => d.key?.startsWith('chars/'));
@@ -6926,14 +6955,12 @@ const LoreKeeper = {
             <option value="">Tüm Gruplar</option>
             ${orgs.map(o=>`<option value="${o}"${this._charFilter.org===o?' selected':''}>${o}</option>`).join('')}
           </select>
-          <select id="lk-char-type"
+          <select id="lk-char-player"
             style="background:var(--bg3);border:1px solid var(--ln);color:var(--t1);border-radius:6px;padding:5px 8px;font-size:11px;font-family:var(--sans);outline:none;cursor:pointer"
-            onchange="LoreKeeper._charFilter.type=this.value;LoreKeeper._filterCharCards()">
-            <option value="all"${this._charFilter.type==='all'?' selected':''}>Hepsi</option>
-            <option value="pc"${this._charFilter.type==='pc'?' selected':''}>Oyuncu</option>
-            <option value="npc"${this._charFilter.type==='npc'?' selected':''}>NPC</option>
-            <option value="active"${this._charFilter.type==='active'?' selected':''}>Aktif</option>
-            <option value="dead"${this._charFilter.type==='dead'?' selected':''}>Ölü</option>
+            onchange="LoreKeeper._charFilter.player=this.value;LoreKeeper._filterCharCards()">
+            <option value="all"${this._charFilter.player==='all'?' selected':''}>Tüm Oyuncular</option>
+            <option value="npc"${this._charFilter.player==='npc'?' selected':''}>NPC</option>
+            ${(USERS||[]).filter(u=>!u.isMA).map(u=>`<option value="${u.id}"${this._charFilter.player===u.id?' selected':''}>${u.name}</option>`).join('')}
           </select>
           <button onclick="LoreKeeper.newChar()" style="font-size:10px;padding:5px 10px;background:rgba(80,200,150,.12);border:1px solid rgba(80,200,150,.3);color:#50c896;border-radius:5px;cursor:pointer;white-space:nowrap">+ Yeni</button>
         </div>
@@ -6949,9 +6976,9 @@ const LoreKeeper = {
     const countEl = document.getElementById('lk-char-count');
     if (!grid) return;
 
-    const q   = (this._charFilter.q || '').toLowerCase().trim();
-    const org = this._charFilter.org || '';
-    const typ = this._charFilter.type || 'all';
+    const q      = (this._charFilter.q || '').toLowerCase().trim();
+    const org    = this._charFilter.org || '';
+    const player = this._charFilter.player || 'all';
 
     const filtered = this._charData.filter(m => {
       const dc = m.dbChar;
@@ -6967,11 +6994,9 @@ const LoreKeeper = {
         });
         if (!memberOrgs.includes(org)) return false;
       } else if (org && !dc) return false;
-      // Type filter
-      if (typ === 'pc'     && !(dc && dc.playerId)) return false;
-      if (typ === 'npc'    && !(dc && !dc.playerId)) return false;
-      if (typ === 'active' && dc?.status === 'Deceased') return false;
-      if (typ === 'dead'   && dc?.status !== 'Deceased') return false;
+      // Player filter
+      if (player === 'npc' && dc?.playerId) return false;
+      if (player !== 'all' && player !== 'npc' && (dc?.playerId || '') !== player) return false;
       return true;
     });
 
@@ -6992,17 +7017,18 @@ const LoreKeeper = {
       const deadBadge = dc?.status === 'Deceased' ? `<span style="font-size:8px;background:rgba(239,68,68,.15);color:#ef4444;padding:1px 5px;border-radius:3px;margin-left:4px">†</span>` : '';
       const threatBadge = dc?.threatLevel ? `<span style="font-size:8px;padding:1px 5px;border-radius:3px;background:rgba(0,0,0,.3);color:${threatColor[dc.threatLevel]||'var(--t3)'}">⚠ ${dc.threatLevel}</span>` : '';
       const heatBadge   = dc?.heatLevel   ? `<span style="font-size:8px;padding:1px 5px;border-radius:3px;background:rgba(0,0,0,.3);color:${heatColor[dc.heatLevel]||'var(--t3)'}">🌡 ${dc.heatLevel}</span>` : '';
-      const editBtn = m.kanonKey ? `<button onclick="LoreKeeper._openCharEdit('${m.kanonKey}')" style="flex:1;padding:4px 0;font-size:9px;background:var(--bg3);border:1px solid var(--ln);color:var(--t2);border-radius:4px;cursor:pointer">✏️ Kanon</button>` : '';
-      const dbBtn   = dc          ? `<button onclick="LoreKeeper._openInDB('${dc.id}')" style="flex:1;padding:4px 0;font-size:9px;background:var(--bg3);border:1px solid rgba(80,200,150,.3);color:#50c896;border-radius:4px;cursor:pointer">🗂 DB'de Aç</button>` : '';
+      const playerBadge = dc?.playerId ? (()=>{const u=(USERS||[]).find(u=>u.id===dc.playerId);return u?`<span style="font-size:8px;padding:1px 6px;border-radius:3px;border:1px solid ${u.color}40;color:${u.color}">${u.name}</span>`:''})() : '';
+      const kanonKey = m.kanonKey ? `'${m.kanonKey}'` : 'null';
+      const dbId = dc ? `'${dc.id}'` : 'null';
 
-      return `<div style="background:var(--bg2);border:1px solid var(--ln);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;transition:border-color .15s" onmouseover="this.style.borderColor='rgba(80,200,150,.4)'" onmouseout="this.style.borderColor='var(--ln)'">
+      return `<div onclick="LoreKeeper._openCharModal(${kanonKey},${dbId})" style="background:var(--bg2);border:1px solid var(--ln);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;cursor:pointer;transition:border-color .15s,transform .12s" onmouseover="this.style.borderColor='rgba(80,200,150,.4)';this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--ln)';this.style.transform=''">
         ${img}
         <div style="padding:8px 10px;flex:1;display:flex;flex-direction:column;gap:3px">
-          <div style="font-size:12px;color:var(--t0);font-weight:700;display:flex;align-items:center;flex-wrap:wrap">${m.label}${npcBadge}${deadBadge}</div>
+          <div style="font-size:12px;color:var(--t0);font-weight:700;display:flex;align-items:center;flex-wrap:wrap;gap:3px">${m.label}${npcBadge}${deadBadge}</div>
           ${aliasBadge}
+          ${playerBadge ? `<div style="margin-top:2px">${playerBadge}</div>` : ''}
           ${descHtml}
           ${(threatBadge||heatBadge) ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">${threatBadge}${heatBadge}</div>` : ''}
-          <div style="display:flex;gap:4px;margin-top:auto;padding-top:8px">${editBtn}${dbBtn}</div>
         </div>
       </div>`;
     }).join('') || '<div style="color:var(--t3);font-size:11px;padding:20px;grid-column:1/-1">Sonuç bulunamadı.</div>';
@@ -7028,29 +7054,113 @@ const LoreKeeper = {
   },
 
   _openInDB(charId) {
-    // Close LoreKeeper and open NYC_DB surveillance net filtered to this character
-    this.close();
-    // Try to select the character in the surveillance view
-    if (typeof S !== 'undefined' && S.ci) {
-      const c = S.ci.get(charId) || (S.chars||[]).find(x=>String(x.id)===String(charId));
-      if (c && typeof UI !== 'undefined') {
-        // Switch to surveillance tab and show character
-        const survBtn = document.querySelector('[data-tab="surv"]') || document.querySelector('.tab-btn');
-        if (survBtn) survBtn.click();
-        setTimeout(() => {
-          if (typeof showCharDetail === 'function') showCharDetail(charId);
-          else if (typeof UI.showCharDetail === 'function') UI.showCharDetail(charId);
-          else {
-            // Find character card and click it
-            const cards = document.querySelectorAll('[data-char-id]');
-            cards.forEach(card => { if (card.dataset.charId === String(charId)) card.click(); });
-          }
-        }, 200);
-        toast(`${c.name} — DB'de açılıyor`, 'info');
-        return;
-      }
+    if (!charId) { toast('DB kaydı yok', 'warn'); return; }
+    // NYC_DB is a separate app — open it in a new tab with #char=ID hash
+    // NYC_DB engine reads location.hash on load and calls UI.openModal(id)
+    const NYC_DB_URL = 'https://erenaydintas.github.io/nyc_db/';
+    window.open(`${NYC_DB_URL}#char=${charId}`, '_blank');
+  },
+
+  async _openCharModal(kanonKey, dbId) {
+    this._modalKey  = kanonKey;
+    this._modalDbId = dbId;
+    const modal = document.getElementById('lk-char-modal');
+    if (!modal) return;
+
+    // Populate header
+    const dc = dbId ? ((S.chars||[]).find(c=>String(c.id)===String(dbId))) : null;
+    const nameEl  = document.getElementById('lk-cm-name');
+    const aliasEl = document.getElementById('lk-cm-alias');
+    const imgEl   = document.getElementById('lk-cm-img');
+    const imgPh   = document.getElementById('lk-cm-img-ph');
+    const badges  = document.getElementById('lk-cm-badges');
+    const playerEl= document.getElementById('lk-cm-player');
+    const bodyEl  = document.getElementById('lk-cm-body');
+    const editBtn = document.getElementById('lk-cm-edit-btn');
+    const dbBtn   = document.getElementById('lk-cm-db-btn');
+
+    const label = dc?.name || (kanonKey ? kanonKey.replace('chars/','').replace(/-/g,' ') : '?');
+    if (nameEl) nameEl.textContent = label;
+    if (aliasEl) aliasEl.textContent = dc?.alias ? `"${dc.alias}"` : '';
+
+    // Photo
+    if (dc?.image) {
+      if (imgEl)  { imgEl.src = dc.image; imgEl.style.display = 'block'; }
+      if (imgPh)  imgPh.style.display = 'none';
+    } else {
+      if (imgEl)  imgEl.style.display = 'none';
+      if (imgPh)  imgPh.style.display = 'flex';
     }
-    toast('DB karakteri bulunamadı', 'warn');
+
+    // Badges
+    const threatColor = { Low:'#50c896', Medium:'#fbbf24', High:'#f97316', Critical:'#ef4444', Omega:'#a855f7' };
+    const heatColor   = { Clean:'#50c896', Warm:'#fbbf24', Hot:'#f97316', Burning:'#ef4444', Scorched:'#a855f7', Wanted:'#ec4899' };
+    if (badges) {
+      const bads = [];
+      if (dc && !dc.playerId) bads.push(`<span style="font-size:9px;background:rgba(80,200,150,.15);color:#50c896;padding:2px 7px;border-radius:4px">NPC</span>`);
+      if (dc?.status==='Deceased') bads.push(`<span style="font-size:9px;background:rgba(239,68,68,.15);color:#ef4444;padding:2px 7px;border-radius:4px">† Ölü</span>`);
+      if (dc?.threatLevel) bads.push(`<span style="font-size:9px;padding:2px 7px;border-radius:4px;background:rgba(0,0,0,.3);color:${threatColor[dc.threatLevel]||'var(--t3)'}">⚠ ${dc.threatLevel}</span>`);
+      if (dc?.heatLevel)   bads.push(`<span style="font-size:9px;padding:2px 7px;border-radius:4px;background:rgba(0,0,0,.3);color:${heatColor[dc.heatLevel]||'var(--t3)'}">🌡 ${dc.heatLevel}</span>`);
+      badges.innerHTML = bads.join('');
+    }
+
+    // Player
+    if (playerEl && dc?.playerId) {
+      const u = (USERS||[]).find(u=>u.id===dc.playerId);
+      playerEl.innerHTML = u ? `<span style="color:${u.color}">● ${u.name}</span>'ın karakteri` : '';
+    } else if (playerEl) playerEl.textContent = '';
+
+    // Orgs
+    let orgLine = '';
+    if (dc?.organizations?.length) {
+      const orgNames = dc.organizations.map(oid=>(S.orgs||[]).find(o=>o.id===oid)?.name).filter(Boolean);
+      if (orgNames.length) orgLine = `<div style="font-size:10px;color:var(--t3);margin-bottom:10px">${orgNames.join(' · ')}</div>`;
+    }
+
+    // Toggle buttons
+    if (editBtn) editBtn.style.display = kanonKey ? '' : 'none';
+    if (dbBtn)   dbBtn.style.display   = dbId     ? '' : 'none';
+
+    // Body: load kanon content
+    if (bodyEl) bodyEl.innerHTML = `${orgLine}<div style="color:var(--t3);font-size:10px">Yükleniyor…</div>`;
+    modal.style.display = 'flex';
+
+    if (kanonKey) {
+      try {
+        const doc = await KanonDB.loadDoc(kanonKey);
+        const content = doc?.content || '';
+        if (bodyEl) {
+          if (!content.trim()) {
+            bodyEl.innerHTML = `${orgLine}<div style="color:var(--t3)">Kanon belgesi henüz yazılmamış.</div>` +
+              (dc?.story ? `<div style="margin-top:10px;padding:10px;background:var(--bg3);border-radius:6px;font-size:10px;color:var(--t2)"><strong style="color:var(--t3);font-size:9px;letter-spacing:.1em">NYC_DB ÖZET</strong><br>${dc.story.slice(0,500).replace(/</g,'&lt;')}${dc.story.length>500?'…':''}</div>` : '');
+          } else {
+            // Render markdown (sections as readable summary)
+            let html = content
+              .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+              .replace(/^# .+$/gm,'') // skip H1 (already shown as name)
+              .replace(/^## (.+)$/gm,'<div style="font-size:10px;color:#50c896;font-weight:700;margin:12px 0 4px;text-transform:uppercase;letter-spacing:.08em">$1</div>')
+              .replace(/^### (.+)$/gm,'<div style="font-size:10px;color:var(--t1);font-weight:600;margin:8px 0 3px">$1</div>')
+              .replace(/\*\*(.+?)\*\*/g,'<strong style="color:var(--t0)">$1</strong>')
+              .replace(/\*(.+?)\*/g,'<em style="color:var(--t2)">$1</em>')
+              .replace(/^[-•] (.+)$/gm,'<div style="padding:2px 0 2px 12px;position:relative"><span style="position:absolute;left:3px;color:var(--t3)">›</span>$1</div>')
+              .replace(/\n{2,}/g,'<div style="margin:5px 0"></div>')
+              .replace(/\n/g,'<br>');
+            bodyEl.innerHTML = orgLine + html;
+          }
+        }
+      } catch(e) {
+        if (bodyEl) bodyEl.innerHTML = `${orgLine}<div style="color:#f77">Yüklenemedi: ${e.message}</div>`;
+      }
+    } else if (dc?.story && bodyEl) {
+      bodyEl.innerHTML = `${orgLine}<div style="font-size:10px;color:var(--t3);margin-bottom:6px">NYC_DB özeti:</div>${dc.story.slice(0,600).replace(/</g,'&lt;')}${dc.story.length>600?'…':''}`;
+    } else if (bodyEl) {
+      bodyEl.innerHTML = `${orgLine}<div style="color:var(--t3)">Bu karakter için içerik yok.</div>`;
+    }
+  },
+
+  _closeCharModal() {
+    const modal = document.getElementById('lk-char-modal');
+    if (modal) modal.style.display = 'none';
   },
 
   _renderListSingle(sec) {
