@@ -6850,90 +6850,162 @@ const LoreKeeper = {
     }).join('');
   },
 
+  // ── Char grid state ──────────────────────────────────────────
+  _charData: [],      // merged list (built once per open)
+  _charDescMap: {},   // kanonKey → first-line description
+  _charFilter: { q: '', org: '', type: 'all' },
+
   async _renderCharCards() {
-    // Load all char docs from kanon
     const kanonChars = (KanonDB._listCache || []).filter(d => d.key?.startsWith('chars/'));
     const dbChars = S.chars || [];
 
     if (!kanonChars.length && !dbChars.length) {
-      this._showContent('<div style="color:var(--t3);font-size:12px;padding:40px;text-align:center">Karakter yok.<br><small style="color:var(--t3)">📥 İçe Aktar ile Kanon\'dan yükle</small></div>');
+      this._showContent('<div style="color:var(--t3);font-size:12px;padding:40px;text-align:center">Karakter yok.<br><small>📥 İçe Aktar ile Kanon\'dan yükle</small></div>');
       return;
     }
 
     this._showContent('<div style="color:var(--t3);font-size:11px;padding:20px">Yükleniyor…</div>');
 
-    // Build a merged list: prefer kanonChars, enrich with NYC_DB data
+    // Build merged list
     const merged = [];
     const usedDbIds = new Set();
-
     for (const kc of kanonChars) {
       const slug = kc.key.replace('chars/', '');
-      // Try to find matching NYC_DB character by name/slug
       const dbChar = dbChars.find(c => {
-        const cSlug = (c.name || '').toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9\-]/g,'');
-        return cSlug === slug || (c.alias || '').toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9\-]/g,'') === slug;
+        const cSlug = (c.name||'').toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9\-]/g,'');
+        return cSlug === slug || (c.alias||'').toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9\-]/g,'') === slug;
       });
       if (dbChar) usedDbIds.add(dbChar.id);
       merged.push({ kanonKey: kc.key, slug, label: kc.label || slug, dbChar: dbChar || null });
     }
-    // Add NYC_DB chars that have no kanon doc yet (DB-only)
     for (const dc of dbChars) {
-      if (!usedDbIds.has(dc.id)) {
+      if (!usedDbIds.has(dc.id))
         merged.push({ kanonKey: null, slug: (dc.name||'').toLowerCase().replace(/\s+/g,'-'), label: dc.name || dc.id, dbChar: dc });
-      }
     }
 
-    // Load kanon content for first-line description (batch, max 20 for speed)
+    // Sort alphabetically
+    merged.sort((a, b) => a.label.localeCompare(b.label, 'tr'));
+    this._charData = merged;
+
+    // Load descriptions
     const descMap = {};
-    await Promise.all(merged.slice(0,40).map(async m => {
+    await Promise.all(merged.slice(0, 60).map(async m => {
       if (!m.kanonKey) return;
       try {
         const doc = await KanonDB.loadDoc(m.kanonKey);
         if (doc?.content) {
-          // Extract first non-heading, non-empty line as description
           const lines = doc.content.split('\n');
           const desc = lines.find(l => l.trim() && !l.startsWith('#') && !l.startsWith('---'));
           descMap[m.kanonKey] = desc ? desc.replace(/^\*+|\*+$/g,'').trim() : '';
         }
       } catch(e){}
     }));
+    this._charDescMap = descMap;
+
+    // Build org list for filter dropdown
+    const orgSet = new Set();
+    for (const m of merged) {
+      if (m.dbChar?.organizations?.length) m.dbChar.organizations.forEach(oid => {
+        const org = (S.orgs||[]).find(o => o.id === oid);
+        if (org?.name) orgSet.add(org.name);
+      });
+    }
+    const orgs = [...orgSet].sort((a,b)=>a.localeCompare(b,'tr'));
+
+    // Render shell with controls + card grid placeholder
+    this._showContent(`
+      <div style="padding:12px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <input id="lk-char-q" type="text" placeholder="🔍 İsim veya takma ad ara…"
+            value="${this._charFilter.q}"
+            style="flex:1;min-width:120px;background:var(--bg3);border:1px solid var(--ln);color:var(--t1);border-radius:6px;padding:5px 10px;font-size:11px;font-family:var(--sans);outline:none"
+            oninput="LoreKeeper._charFilter.q=this.value;LoreKeeper._filterCharCards()">
+          <select id="lk-char-org"
+            style="background:var(--bg3);border:1px solid var(--ln);color:var(--t1);border-radius:6px;padding:5px 8px;font-size:11px;font-family:var(--sans);outline:none;cursor:pointer"
+            onchange="LoreKeeper._charFilter.org=this.value;LoreKeeper._filterCharCards()">
+            <option value="">Tüm Gruplar</option>
+            ${orgs.map(o=>`<option value="${o}"${this._charFilter.org===o?' selected':''}>${o}</option>`).join('')}
+          </select>
+          <select id="lk-char-type"
+            style="background:var(--bg3);border:1px solid var(--ln);color:var(--t1);border-radius:6px;padding:5px 8px;font-size:11px;font-family:var(--sans);outline:none;cursor:pointer"
+            onchange="LoreKeeper._charFilter.type=this.value;LoreKeeper._filterCharCards()">
+            <option value="all"${this._charFilter.type==='all'?' selected':''}>Hepsi</option>
+            <option value="pc"${this._charFilter.type==='pc'?' selected':''}>Oyuncu</option>
+            <option value="npc"${this._charFilter.type==='npc'?' selected':''}>NPC</option>
+            <option value="active"${this._charFilter.type==='active'?' selected':''}>Aktif</option>
+            <option value="dead"${this._charFilter.type==='dead'?' selected':''}>Ölü</option>
+          </select>
+          <button onclick="LoreKeeper.newChar()" style="font-size:10px;padding:5px 10px;background:rgba(80,200,150,.12);border:1px solid rgba(80,200,150,.3);color:#50c896;border-radius:5px;cursor:pointer;white-space:nowrap">+ Yeni</button>
+        </div>
+        <div id="lk-char-count" style="font-size:10px;color:var(--t3);margin-bottom:10px"></div>
+        <div id="lk-char-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px"></div>
+      </div>`);
+
+    this._filterCharCards();
+  },
+
+  _filterCharCards() {
+    const grid = document.getElementById('lk-char-grid');
+    const countEl = document.getElementById('lk-char-count');
+    if (!grid) return;
+
+    const q   = (this._charFilter.q || '').toLowerCase().trim();
+    const org = this._charFilter.org || '';
+    const typ = this._charFilter.type || 'all';
+
+    const filtered = this._charData.filter(m => {
+      const dc = m.dbChar;
+      // Text search
+      if (q) {
+        const hay = [m.label, dc?.alias, dc?.name].filter(Boolean).join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      // Org filter
+      if (org && dc) {
+        const memberOrgs = (dc.organizations||[]).map(oid => {
+          const o = (S.orgs||[]).find(x=>x.id===oid); return o?.name||'';
+        });
+        if (!memberOrgs.includes(org)) return false;
+      } else if (org && !dc) return false;
+      // Type filter
+      if (typ === 'pc'     && !(dc && dc.playerId)) return false;
+      if (typ === 'npc'    && !(dc && !dc.playerId)) return false;
+      if (typ === 'active' && dc?.status === 'Deceased') return false;
+      if (typ === 'dead'   && dc?.status !== 'Deceased') return false;
+      return true;
+    });
+
+    if (countEl) countEl.textContent = `${filtered.length} / ${this._charData.length} karakter`;
 
     const threatColor = { Low:'#50c896', Medium:'#fbbf24', High:'#f97316', Critical:'#ef4444', Omega:'#a855f7' };
     const heatColor   = { Clean:'#50c896', Warm:'#fbbf24', Hot:'#f97316', Burning:'#ef4444', Scorched:'#a855f7', Wanted:'#ec4899' };
 
-    const cards = merged.map(m => {
+    grid.innerHTML = filtered.map(m => {
       const dc = m.dbChar;
-      const img = dc?.image ? `<img src="${dc.image}" style="width:100%;height:110px;object-fit:cover;border-radius:6px 6px 0 0;display:block" onerror="this.style.display='none'">` : `<div style="width:100%;height:110px;background:var(--bg3);border-radius:6px 6px 0 0;display:flex;align-items:center;justify-content:center;font-size:32px">👤</div>`;
-      const desc = (descMap[m.kanonKey] || dc?.story?.slice(0,120) || '').slice(0,120);
+      const img = dc?.image
+        ? `<img src="${dc.image}" style="width:100%;height:110px;object-fit:cover;border-radius:6px 6px 0 0;display:block" onerror="this.style.display='none'">`
+        : `<div style="width:100%;height:110px;background:var(--bg3);border-radius:6px 6px 0 0;display:flex;align-items:center;justify-content:center;font-size:32px">👤</div>`;
+      const desc = (this._charDescMap[m.kanonKey] || dc?.story?.slice(0,120) || '').slice(0,120);
       const descHtml = desc ? `<div style="font-size:10px;color:var(--t2);line-height:1.4;margin-top:4px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${desc.replace(/</g,'&lt;')}</div>` : '';
       const aliasBadge = dc?.alias ? `<div style="font-size:9px;color:var(--t3);margin-top:1px">"${dc.alias}"</div>` : '';
-      const npcBadge = dc && !dc.playerId ? `<span style="font-size:8px;background:rgba(80,200,150,.15);color:#50c896;padding:1px 5px;border-radius:3px;margin-left:4px">NPC</span>` : '';
+      const npcBadge  = dc && !dc.playerId ? `<span style="font-size:8px;background:rgba(80,200,150,.15);color:#50c896;padding:1px 5px;border-radius:3px;margin-left:4px">NPC</span>` : '';
       const deadBadge = dc?.status === 'Deceased' ? `<span style="font-size:8px;background:rgba(239,68,68,.15);color:#ef4444;padding:1px 5px;border-radius:3px;margin-left:4px">†</span>` : '';
       const threatBadge = dc?.threatLevel ? `<span style="font-size:8px;padding:1px 5px;border-radius:3px;background:rgba(0,0,0,.3);color:${threatColor[dc.threatLevel]||'var(--t3)'}">⚠ ${dc.threatLevel}</span>` : '';
-      const heatBadge = dc?.heatLevel ? `<span style="font-size:8px;padding:1px 5px;border-radius:3px;background:rgba(0,0,0,.3);color:${heatColor[dc.heatLevel]||'var(--t3)'}">🌡 ${dc.heatLevel}</span>` : '';
+      const heatBadge   = dc?.heatLevel   ? `<span style="font-size:8px;padding:1px 5px;border-radius:3px;background:rgba(0,0,0,.3);color:${heatColor[dc.heatLevel]||'var(--t3)'}">🌡 ${dc.heatLevel}</span>` : '';
       const editBtn = m.kanonKey ? `<button onclick="LoreKeeper._openCharEdit('${m.kanonKey}')" style="flex:1;padding:4px 0;font-size:9px;background:var(--bg3);border:1px solid var(--ln);color:var(--t2);border-radius:4px;cursor:pointer">✏️ Kanon</button>` : '';
-      const dbBtn = dc ? `<button onclick="LoreKeeper._openInDB('${dc.id}')" style="flex:1;padding:4px 0;font-size:9px;background:var(--bg3);border:1px solid rgba(80,200,150,.3);color:#50c896;border-radius:4px;cursor:pointer">🗂 DB'de Aç</button>` : '';
+      const dbBtn   = dc          ? `<button onclick="LoreKeeper._openInDB('${dc.id}')" style="flex:1;padding:4px 0;font-size:9px;background:var(--bg3);border:1px solid rgba(80,200,150,.3);color:#50c896;border-radius:4px;cursor:pointer">🗂 DB'de Aç</button>` : '';
 
-      return `<div style="background:var(--bg2);border:1px solid var(--ln);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;cursor:default;transition:border-color .15s" onmouseover="this.style.borderColor='rgba(80,200,150,.4)'" onmouseout="this.style.borderColor='var(--ln)'">
+      return `<div style="background:var(--bg2);border:1px solid var(--ln);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;transition:border-color .15s" onmouseover="this.style.borderColor='rgba(80,200,150,.4)'" onmouseout="this.style.borderColor='var(--ln)'">
         ${img}
         <div style="padding:8px 10px;flex:1;display:flex;flex-direction:column;gap:3px">
-          <div style="font-size:12px;color:var(--t0);font-weight:700;display:flex;align-items:center">${m.label}${npcBadge}${deadBadge}</div>
+          <div style="font-size:12px;color:var(--t0);font-weight:700;display:flex;align-items:center;flex-wrap:wrap">${m.label}${npcBadge}${deadBadge}</div>
           ${aliasBadge}
           ${descHtml}
-          ${(threatBadge || heatBadge) ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">${threatBadge}${heatBadge}</div>` : ''}
+          ${(threatBadge||heatBadge) ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">${threatBadge}${heatBadge}</div>` : ''}
           <div style="display:flex;gap:4px;margin-top:auto;padding-top:8px">${editBtn}${dbBtn}</div>
         </div>
       </div>`;
-    }).join('');
-
-    this._showContent(`
-      <div style="padding:12px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <div style="font-size:11px;color:var(--t3)">${merged.length} karakter</div>
-          <button onclick="LoreKeeper.newChar()" style="font-size:10px;padding:4px 10px;background:rgba(80,200,150,.12);border:1px solid rgba(80,200,150,.3);color:#50c896;border-radius:5px;cursor:pointer">+ Yeni Karakter</button>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px">${cards}</div>
-      </div>`);
+    }).join('') || '<div style="color:var(--t3);font-size:11px;padding:20px;grid-column:1/-1">Sonuç bulunamadı.</div>';
   },
 
   async _openCharEdit(key) {
