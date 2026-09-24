@@ -5303,6 +5303,15 @@ Login._start=async function(u){
         <button class="adm-btn" style="font-size:10px;border-color:rgba(155,111,212,.4);color:var(--pu)" onclick="MAPanel.loadMAChars()"><i class="fas fa-sync-alt"></i></button>
       </div>
 
+      <!-- Oto-devam oda seçimi -->
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 12px 0;border-top:1px solid var(--ln)">
+        <span style="font-family:var(--mono);font-size:9px;color:var(--t3);white-space:nowrap">🤖 Oto Oda:</span>
+        <select id="ma-auto-room-select" onchange="MAPanel._autoRoomId=this.value||null"
+          style="flex:1;background:var(--bg2);border:1px solid var(--ln);color:var(--t1);border-radius:4px;padding:2px 5px;font-family:var(--mono);font-size:9px;outline:none">
+          <option value="">— Aktif oda (otomatik) —</option>
+        </select>
+      </div>
+
       <!-- Input area with room selector -->
       <div style="border-top:1px solid var(--ln);background:var(--bg0)">
         <div style="display:flex;align-items:center;gap:8px;padding:6px 16px 0">
@@ -6121,6 +6130,54 @@ const MasterAgent = {
           // If char_id not found in S.chars → ignore it, treat as NPC
         }
 
+        // ── İZİN KONTROLÜ: MA oyuncu karakterini oynamak istiyorsa sor ──
+        if (isRealChar) {
+          const isPlayerChar = (S.activeChars||[]).some(c => String(c.id) === String(charId))
+                            || (S.user && String(charId) === String(S.activeChar?.id));
+          if (isPlayerChar) {
+            // İzin bekliyor mu? Varsa iptal et
+            const permKey = `ma_perm_${charId}`;
+            const existing = window._maPermPending?.[permKey];
+            if (existing === 'denied') {
+              results.push(`⛔ ${charName} karakterini oynama izni reddedildi.`);
+              return results.join('\n');
+            }
+            if (existing !== 'granted') {
+              // İzin iste — non-blocking toast + callback
+              if (!window._maPermPending) window._maPermPending = {};
+              window._maPermPending[permKey] = 'pending';
+              const pendingPayload = { ...params, _resolved: true };
+              // Toast ile izin sor
+              const toastEl = document.createElement('div');
+              toastEl.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(30,20,50,.97);border:1px solid rgba(155,111,212,.6);border-radius:10px;padding:14px 18px;z-index:9999;max-width:340px;text-align:center;font-family:var(--sans)';
+              toastEl.innerHTML = `
+                <div style="color:var(--pu);font-size:12px;font-weight:700;margin-bottom:6px">⚠️ İzin Gerekli</div>
+                <div style="color:var(--t1);font-size:11px;margin-bottom:12px">MA <b>${charName}</b> karakterini oynamak istiyor.<br><span style="color:var(--t3);font-size:10px">"${(params.content||'').slice(0,80)}"</span></div>
+                <div style="display:flex;gap:8px;justify-content:center">
+                  <button id="ma-perm-grant" style="padding:6px 16px;background:rgba(155,111,212,.3);border:1px solid rgba(155,111,212,.6);color:var(--pu);border-radius:6px;cursor:pointer;font-size:11px;font-family:var(--sans)">✅ İzin Ver</button>
+                  <button id="ma-perm-deny" style="padding:6px 16px;background:rgba(200,60,60,.2);border:1px solid rgba(200,60,60,.4);color:#f77;border-radius:6px;cursor:pointer;font-size:11px;font-family:var(--sans)">❌ Reddet</button>
+                </div>`;
+              document.body.appendChild(toastEl);
+              toastEl.querySelector('#ma-perm-grant').onclick = async () => {
+                window._maPermPending[permKey] = 'granted';
+                toastEl.remove();
+                // Tekrar gönder
+                await MasterAgent._execSendMsg(pendingPayload, results);
+              };
+              toastEl.querySelector('#ma-perm-deny').onclick = () => {
+                window._maPermPending[permKey] = 'denied';
+                toastEl.remove();
+                toast(`MA'nın ${charName} oynaması engellendi`, 'info');
+              };
+              setTimeout(() => { toastEl.remove(); if (window._maPermPending?.[permKey] === 'pending') window._maPermPending[permKey] = null; }, 30000);
+              results.push(`⏳ ${charName} için izin bekleniyor…`);
+              return results.join('\n');
+            }
+            // granted — devam et, single-use: sıfırla
+            window._maPermPending[permKey] = null;
+          }
+        }
+
         // org override from params (for NPC org context)
         if (!isRealChar && params.org_name) {
           orgName  = params.org_name;
@@ -6167,6 +6224,26 @@ const MasterAgent = {
       } catch(e) {
         results.push('❌ Mesaj gönderilemedi: ' + e.message);
       }
+    }
+
+    // _execSendMsg: izin onayı sonrası tekrar tetiklemek için
+    if (!MasterAgent._execSendMsg) {
+      MasterAgent._execSendMsg = async function(params, results) {
+        // Sadece o tek mesajı tekrar işle — basit DB.post
+        try {
+          const roomId = params.room_id || S.roomId;
+          const found = params.char_id ? (S.chars||[]).find(c => String(c.id) === String(params.char_id)) : null;
+          const charName = found?.name || params.char_name || 'NPC';
+          const charAlias = found?.alias || params.char_alias || '';
+          const org = found ? S.oi?.get((found.organizations||[])[0]||found.organization) : null;
+          const rpTime = await RpTime.onMessage(roomId, params.content);
+          const pl = { room_id: roomId, char_id: found?.id||null, char_name: charName, char_alias: charAlias, char_avatar: found?.image||'', org_id: org?.id||null, org_name: org?.name||params.org_name||null, org_color: org?.color||null, content: params.content, attachment_url: null, reactions: {}, is_edited: false, sent_by_user: 'master_agent', rp_time: rpTime||null };
+          const ref = await DB.post('rp_messages', pl);
+          if (ref?.id) { MasterAgent._sentIds?.add(ref.id); MasterAgent._lastSentAt = Date.now(); }
+          if (window.MAPanel) MAPanel.notifyNewMsg(found?.id||null, charName, charAlias||null, org?.name||null);
+          results && results.push(`✅ ${charName} mesajı gönderildi (izin sonrası)`);
+        } catch(e) { results && results.push(`❌ ${e.message}`); }
+      };
     }
 
     return results.length ? results.join('\n') : null;
@@ -6338,8 +6415,9 @@ const MasterAgent = {
     const charName = sentMsg.char_name || '?';
     const content  = sentMsg.content  || '';
 
-    // MA'nın bu sahnede oynadığı son karakteri bul
-    const roomMsgs = (S?.msgs?.[S?.roomId] || []);
+    // MA'nın bu sahnede oynadığı son karakteri bul (seçili oda öncelikli)
+    const autoRoomId = window.MAPanel ? MAPanel.getAutoRoomId() : S.roomId;
+    const roomMsgs = (S?.msgs?.[autoRoomId] || S?.msgs?.[S?.roomId] || []);
     const lastMAMsg = [...roomMsgs].reverse().find(m => (m.char_name||'').toLowerCase().includes('master agent'));
     const maCurrentChar = lastMAMsg ? (lastMAMsg.char_alias || lastMAMsg.char_name || null) : null;
     const maCurrentCharId = lastMAMsg?.char_id || null;
@@ -6964,18 +7042,18 @@ const MAPanel = {
       const org = c.org_name ? `<div style="font-size:9px;color:var(--t3);margin-top:1px"><i class="fas fa-building" style="font-size:8px"></i> ${c.org_name}</div>` : '';
       const count = `<span style="font-size:9px;color:var(--t3)">${c.msg_count} msg</span>`;
       const hasDirective = !!(this._getCharDirective(c.char_id || c.char_name));
-      const chatBtn = `<button onclick="event.stopPropagation();MAPanel.openCharChat(${i})" title="Karakter talimatı & sohbet"
+      const chatBtn = `<button onclick="event.stopPropagation();MAPanel.openCharChat(${i})" title="Karakter talimatı & ayarlar"
           style="font-size:9px;padding:1px 5px;border:1px solid rgba(155,111,212,.4);border-radius:3px;background:${hasDirective ? 'rgba(155,111,212,.3)' : 'rgba(155,111,212,.08)'};color:var(--pu);cursor:pointer;margin-left:2px;line-height:1.4">💬${hasDirective ? '✓' : ''}</button>`;
-      const saveBtn = c.saved
-        ? `<span style="font-size:9px;color:var(--gn);margin-left:2px" title="NYC_DB'ye kaydedildi"><i class="fas fa-check-circle"></i></span>`
-        : '';
+      const delBtn = `<button onclick="event.stopPropagation();MAPanel.removeChar(${i})" title="Listeden kaldır"
+          style="font-size:9px;padding:1px 5px;border:1px solid rgba(200,60,60,.3);border-radius:3px;background:rgba(200,60,60,.08);color:#f77;cursor:pointer;margin-left:2px;line-height:1.4">✕</button>`;
+      const saveIcon = c.saved ? `<span style="font-size:9px;color:var(--gn);margin-left:2px" title="NYC_DB'ye kaydedildi"><i class="fas fa-check-circle"></i></span>` : '';
       return `<div class="npc-card" style="padding:8px 10px;display:flex;align-items:flex-start;gap:8px;border-bottom:1px solid var(--ln);cursor:pointer"
         onclick="MAPanel.openCharChat(${i})">
         <div style="width:28px;height:28px;border-radius:50%;background:rgba(155,111,212,.25);border:1px solid rgba(155,111,212,.4);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--pu);flex-shrink:0">${initial}</div>
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
             <span style="font-size:11px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.char_name}</span>${alias}
-            <span style="margin-left:auto;display:flex;align-items:center;gap:4px">${count}${chatBtn}${saveBtn}</span>
+            <span style="margin-left:auto;display:flex;align-items:center;gap:2px">${count}${chatBtn}${saveIcon}${delBtn}</span>
           </div>
           ${org}
         </div>
@@ -7019,6 +7097,26 @@ const MAPanel = {
       ? `Şimdi char_id:"${charIdOrName}" (${charName}) karakterini oyna. Mevcut RP ortamına uygun, kısa bir mesaj gönder.`
       : `Şimdi "${charName}" karakterini oyna. Mevcut RP ortamına uygun, kısa bir mesaj gönder.`;
     MasterAgent.send(prompt);
+  },
+
+  removeChar(idx) {
+    const c = this._chars[idx];
+    if (!c) return;
+    if (!confirm(`"${c.char_name}" karakterini listeden kaldır?`)) return;
+    this._chars.splice(idx, 1);
+    this._saveLS();
+    // Direktifi de temizle
+    const key = c.char_id || c.char_name;
+    if (this._directives?.[key]) { delete this._directives[key]; this._saveDirectives(); }
+    if (this._activeChat?.idx === idx) this._activeChat = null;
+    this._render();
+  },
+
+  // Oto-devam için seçili oda — null = mevcut aktif oda
+  _autoRoomId: null,
+
+  getAutoRoomId() {
+    return this._autoRoomId || S.roomId;
   },
 
   // SEND_MSG sonrası char listesini güncelle (yeni karakter eklenmişse)
@@ -7075,16 +7173,30 @@ const MAPanel = {
 
   /* ── Populate room selector dropdown ──────────────── */
   _fillRoomSelect() {
+    const rooms = (S.rooms || []).filter(r => !r.is_archived);
+    // MA mesaj odası seçici
     const sel = document.getElementById('ma-room-select');
-    if (!sel) return;
-    // Clear old options except default
-    while (sel.options.length > 1) sel.remove(1);
-    (S.rooms || []).filter(r => !r.is_archived).forEach(r => {
-      const opt = document.createElement('option');
-      opt.value = r.id;
-      opt.textContent = r.name || r.slug || r.id;
-      sel.appendChild(opt);
-    });
+    if (sel) {
+      while (sel.options.length > 1) sel.remove(1);
+      rooms.forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r.id;
+        opt.textContent = r.name || r.slug || r.id;
+        sel.appendChild(opt);
+      });
+    }
+    // Oto-devam oda seçici
+    const autoSel = document.getElementById('ma-auto-room-select');
+    if (autoSel) {
+      while (autoSel.options.length > 1) autoSel.remove(1);
+      rooms.forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r.id;
+        opt.textContent = r.name || r.slug || r.id;
+        if (r.id === this._autoRoomId) opt.selected = true;
+        autoSel.appendChild(opt);
+      });
+    }
   },
 
   /* ── Sync OAI button state on panel open ──────────── */
