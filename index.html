@@ -876,7 +876,7 @@ const GEM_MDL = () => window._MA_MODEL || window.DM_CONFIG?.geminiModel || 'gemi
 // Shared Gemini REST helper — Observer AI + DM Engine her ikisi de bunu kullanır
 async function _geminiGenerate(prompt, opts={}) {
   const key   = window.DM_CONFIG?.geminiKey;
-  const model = GEM_MDL();
+  const model = opts.model || GEM_MDL();
   if (!key || key === '__GEMINI_KEY__') throw new Error('Gemini API key eksik');
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
@@ -1514,6 +1514,7 @@ const RP={
     // Clear unread badge for this room
     if(S.unread&&S.unread[id]){delete S.unread[id];UI.renderRooms();}
     S.roomId=id;S.typing={};RT.lastId=null;
+    try{localStorage.setItem('nycrp_lastRoomId',String(id));}catch(_){}
     const room=S.rooms.find(r=>r.id==id);
     if(room){document.getElementById('room-title').textContent=room.name;document.getElementById('room-desc').textContent=room.description||'';}
     document.querySelectorAll('.room-item').forEach(el=>el.classList.toggle('active',el.dataset.id==id));
@@ -3763,7 +3764,7 @@ const OAI={
         return `[${t}${rpT}] ${m.char_name}${m.char_alias?` "${m.char_alias}"`:''}${m.org_name?` [${m.org_name}]`:''}: ${body}`;
       }).join('\n');
       const worldCtx=this._worldSnapshot?`\nWORLD CONTEXT (NYC_DB — read only, for reference):\n${this._worldSnapshot}\n`:'';
-      const _kanonTxt=window.KanonEditor?._getForPrompt(true)||'';
+      const _kanonTxt=(window.KanonDB ? await KanonDB.buildObserverContext() : '')||'';
       const kanonObsCtx=_kanonTxt?`\nCANON KNOWLEDGE BASE (character relationships, factions, current state — use for context when analyzing RP messages):\n${_kanonTxt}\n`:'';
       const prompt=`You are NYC_DB Observer AI. Observe only. Return ONLY valid JSON.${worldCtx}${kanonObsCtx}\nMESSAGE FORMAT NOTE: *text* = IC emote/action (purple italic), (( text )) = OOC comment (ignore for IC analysis), **text** = bold, _text_ = italic, ~~text~~ = strikethrough, [color|text] = colored text, @name = player mention. Strip formatting marks when extracting character dialogue/actions for summaries.\nINVOLVED CHARACTERS:\n${charLines||'(unknown)'}\nINVOLVED ORGANIZATIONS:\n${orgLines||'(none)'}\nTRANSCRIPT (${messages.length} messages):\n${tr}\nRespond:{"session_summary":{"title":"","summary":"","involved_chars":[],"involved_orgs":[],"significance":"low"},"incidents":[{"title":"","incident_type":"confrontation","severity":"low","description":"","location_name":"","involved_chars":[],"involved_orgs":[],"source_confidence":0.0}],"character_memories":[{"char_id":"","char_name":"","memory_type":"event","title":"","content":"","emotional_tag":"neutral","importance":50,"about_chars":[]}],"relationship_changes":[{"entity_a_id":"","entity_a_name":"","entity_a_type":"character","entity_b_id":"","entity_b_name":"","entity_b_type":"character","change_type":"neutral","direction":"mutual","trust_delta":0,"description":""}],"flags":{"requires_admin_review":false,"review_reason":""}}`;
       // Shared Gemini REST — Firebase AI Logic artık kullanılmıyor
@@ -4597,7 +4598,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   const obs=new MutationObserver(()=>{const i=document.getElementById('msg-input');if(i&&!i._wired)_wireInput();});
   obs.observe(document.body,{childList:true,subtree:true});
   // Kanon bilgi tabanını arka planda önyükle
-  _fbReady().then(()=>{ if(window.KanonEditor) KanonEditor._load(); }).catch(()=>{});
+  _fbReady().then(()=>{ if(window.KanonDB) KanonDB.loadList().catch(()=>{}); }).catch(()=>{});
 });
 
 /* ═══ PLAYER PROFILE SYSTEM ══════════════════════════════ */
@@ -5328,6 +5329,7 @@ Login._start=async function(u){
         <button id="ma-panel-auto-toggle" class="adm-btn" style="font-size:10px" onclick="MAPanel._toggleAuto()" title="MA otomatik sahne devam ettirme"><i class="fas fa-robot"></i> <span id="ma-panel-auto-txt">🤖 Oto: AÇ</span></button>
         <button id="ma-panel-oai-btn" class="adm-btn" style="font-size:10px" onclick="MAPanel._toggleOAI()" title="Observer AI aç/kapat"><span id="ma-panel-oai-txt">Observer AI: OFF</span></button>
         <button class="adm-btn" style="font-size:10px;border-color:rgba(74,143,226,.4);color:var(--ac)" onclick="KanonEditor.open()" title="Kanon Bilgi Tabanını düzenle"><i class="fas fa-book"></i> 📚 Kanon</button>
+        <button class="adm-btn" style="font-size:10px;border-color:rgba(80,200,150,.4);color:#50c896" onclick="LoreKeeper.open()" title="Lore Keeper — karakter, olay, timeline arşivi"><i class="fas fa-scroll"></i> 📖 Lore</button>
         <button class="adm-btn" style="font-size:10px;border-color:rgba(155,111,212,.4);color:var(--pu)" onclick="MAPanel.loadMAChars()"><i class="fas fa-sync-alt"></i></button>
       </div>
 
@@ -5364,22 +5366,65 @@ Login._start=async function(u){
 
 <!-- Kanon Bilgi Tabanı Modal -->
 <div class="mbd hidden" id="m-kanon">
-  <div class="mbox" style="max-width:860px;width:95vw;height:90vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
-    <div class="mhd" style="padding:14px 18px;display:flex;align-items:center;gap:10px;flex-shrink:0">
-      <span style="font-size:16px">📚</span>
+  <div class="mbox" style="max-width:980px;width:96vw;height:92vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
+    <!-- Header -->
+    <div class="mhd" style="padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0">
+      <span style="font-size:15px">📚</span>
       <span style="font-weight:700;font-size:14px;color:var(--t0)">Kanon Bilgi Tabanı</span>
       <span style="font-size:10px;color:var(--t3);font-family:var(--mono);margin-left:4px" id="kanon-status">—</span>
       <div style="flex:1"></div>
+      <button onclick="KanonEditor.importMD()" style="background:var(--bg3);border:1px solid var(--ln);color:var(--t2);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:11px" title="Markdown dosyasından içe aktar">📥 İçe Aktar</button>
+      <button onclick="KanonEditor.newChar()" style="background:var(--bg3);border:1px solid var(--ln);color:var(--t2);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:11px">+ Karakter</button>
       <button onclick="KanonEditor.save()" style="background:var(--pu);border:none;color:#fff;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:11px;font-family:var(--mono)">💾 Kaydet</button>
       <button onclick="KanonEditor.close()" style="background:var(--bg3);border:1px solid var(--ln);color:var(--t2);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:11px">✕</button>
     </div>
-    <div style="padding:0 18px 6px;font-size:10px;color:var(--t3);font-family:var(--mono);flex-shrink:0;border-bottom:1px solid var(--ln)">
-      Bu belge MA ve Observer AI'a her çağrıda otomatik olarak eklenir. Markdown formatında düzenleyebilirsin.
-      <span style="color:var(--am);margin-left:8px">⚠️ Büyük belgelerde sadece Bölüm 1 ve 5 AI'ya gönderilir (maliyet optimizasyonu).</span>
+    <!-- Two-panel body -->
+    <div style="display:flex;flex:1;overflow:hidden;min-height:0">
+      <!-- Left: doc list -->
+      <div id="kanon-list" style="width:210px;min-width:160px;border-right:1px solid var(--ln);overflow-y:auto;flex-shrink:0;background:var(--bg1);padding:6px 0"></div>
+      <!-- Right: editor -->
+      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0">
+        <div id="kanon-doc-title" style="padding:8px 16px;font-size:11px;font-family:var(--mono);color:var(--t3);border-bottom:1px solid var(--ln);background:var(--bg2);flex-shrink:0">(belge seçilmedi)</div>
+        <textarea id="kanon-editor-inp"
+          style="flex:1;width:100%;background:var(--bg0);border:none;color:var(--t1);font-family:'Courier New',monospace;font-size:12px;line-height:1.6;padding:14px 16px;resize:none;outline:none;overflow-y:auto;box-sizing:border-box"
+          placeholder="Sol panelden bir bölüm seçin veya 📥 İçe Aktar ile Markdown yükleyin..."></textarea>
+      </div>
     </div>
-    <textarea id="kanon-editor-inp"
-      style="flex:1;width:100%;background:var(--bg0);border:none;color:var(--t1);font-family:'Courier New',monospace;font-size:12px;line-height:1.6;padding:16px 18px;resize:none;outline:none;overflow-y:auto;box-sizing:border-box"
-      placeholder="Kanon bilgi tabanı buraya yüklenecek..."></textarea>
+  </div>
+</div>
+
+<!-- Lore Keeper Modal -->
+<div class="mbd hidden" id="m-lore">
+  <div class="mbox" style="max-width:1060px;width:97vw;height:93vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
+    <!-- Header -->
+    <div class="mhd" style="padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0">
+      <span style="font-size:16px">📖</span>
+      <span style="font-weight:700;font-size:14px;color:var(--t0)">Lore Keeper</span>
+      <span style="font-size:10px;color:var(--t3);font-family:var(--mono);margin-left:4px" id="lk-status">—</span>
+      <div style="flex:1"></div>
+      <button onclick="LoreKeeper.close()" style="background:var(--bg3);border:1px solid var(--ln);color:var(--t2);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:11px">✕</button>
+    </div>
+    <!-- Three-column body -->
+    <div style="display:flex;flex:1;overflow:hidden;min-height:0">
+      <!-- Left: section tabs -->
+      <div id="lk-tabs" style="width:150px;min-width:120px;border-right:1px solid var(--ln);overflow-y:auto;flex-shrink:0;background:var(--bg1);padding:8px 0"></div>
+      <!-- Center: item list -->
+      <div id="lk-list" style="width:220px;min-width:160px;border-right:1px solid var(--ln);overflow-y:auto;flex-shrink:0;background:var(--bg2);padding:6px 0"></div>
+      <!-- Right: content + chat -->
+      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0">
+        <!-- Doc view -->
+        <div id="lk-content" style="flex:1;overflow-y:auto;padding:16px 20px;font-size:12px;line-height:1.7;color:var(--t1);font-family:var(--sans);min-height:0"></div>
+        <!-- AI chat strip -->
+        <div style="border-top:1px solid var(--ln);background:var(--bg2);padding:10px 14px;flex-shrink:0">
+          <div id="lk-chat-log" style="max-height:140px;overflow-y:auto;margin-bottom:8px;font-size:11px;line-height:1.6;font-family:var(--sans)"></div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="lk-inp" type="text" placeholder="Bu konuda bir şey sor… (Enter)" style="flex:1;background:var(--bg3);border:1px solid var(--ln);color:var(--t1);border-radius:6px;padding:7px 12px;font-size:11px;font-family:var(--sans);outline:none" onkeydown="if(event.key==='Enter')LoreKeeper.ask()">
+            <button onclick="LoreKeeper.ask()" style="background:var(--pu);border:none;color:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;font-size:11px;font-family:var(--mono)">Sor</button>
+            <button onclick="LoreKeeper.clearChat()" style="background:var(--bg3);border:1px solid var(--ln);color:var(--t3);border-radius:6px;padding:7px 10px;cursor:pointer;font-size:10px" title="Sohbeti temizle">🗑️</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -5630,82 +5675,403 @@ Object.assign(window.DMPanel, {
 ════════════════════════════════════════════════════════ */
 
 /* ══════════════════════════════════════════════════════
-   KANON EDİTÖR — Firebase'den yükle, içinde düzenle, kaydet.
-   MA ve Observer sistem promptuna otomatik enjekte edilir.
+   KANON ARŞİV SİSTEMİ
+   Firebase koleksiyonu: kanon/
+     kanon/meta           → Kılavuz + Dünya/Ton (her zaman gönderilir)
+     kanon/current_state  → Son Durum Özeti (her zaman gönderilir)
+     kanon/chars/{slug}   → Karakter profilleri (sahnedekiler gönderilir)
+     kanon/factions/{slug}→ Gruplar/Fraksiyonlar
+     kanon/timeline       → Zaman çizelgesi + açık iplikler
+   MA entegrasyonu: meta+current_state her çağrıda, chars sahnedekiler için
 ════════════════════════════════════════════════════════ */
-const KanonEditor = {
-  _content: '',        // bellek içi metin
-  _loaded: false,      // Firebase'den yüklendi mi
-  _dirty: false,       // kaydedilmemiş değişiklik var mı
-  _FIREBASE_DOC: 'settings/kanon_bilgi',
+const KanonDB = {
+  // Bellek içi cache: { 'meta': {content,updated_at}, 'chars/rosé': {...}, ... }
+  _cache: {},
+  _listCache: null,   // tüm doküman listesi
+  _dirty: false,
+  _activeDoc: null,   // { key, label, type } — editörde açık olan
 
-  /* Firebase'den yükle */
-  async _load() {
+  /* ── Firebase helpers ─────────────────────────────── */
+  async _fbCol() {
+    const {db, fs} = await _fbReady();
+    return { db, fs, col: fs.collection(db, 'kanon') };
+  },
+
+  _slug(name) {
+    return name.toLowerCase().replace(/[^a-z0-9ğüşıöç]/g, '_').replace(/__+/g,'_').replace(/^_|_$/g,'');
+  },
+
+  /* ── Tüm doküman listesini yükle ─────────────────── */
+  async loadList() {
     try {
       const {db, fs} = await _fbReady();
-      const ref = fs.doc(db, 'settings', 'kanon_bilgi');
+      const col = fs.collection(db, 'kanon');
+      const snap = await fs.getDocs(col);
+      const list = [];
+      snap.forEach(d => list.push({ key: d.id, ...d.data() }));
+      this._listCache = list;
+      // Cache'e de yükle
+      list.forEach(d => { this._cache[d.key] = d; });
+      return list;
+    } catch(e) {
+      console.warn('[KanonDB] Liste yükleme hatası:', e);
+      return [];
+    }
+  },
+
+  /* ── Tek doküman yükle ───────────────────────────── */
+  async loadDoc(key) {
+    if (this._cache[key]?.content !== undefined) return this._cache[key];
+    try {
+      const {db, fs} = await _fbReady();
+      const ref = fs.doc(db, 'kanon', key);
       const snap = await fs.getDoc(ref);
       if (snap.exists()) {
-        this._content = snap.data().content || '';
-        this._loaded = true;
-        this._setStatus(`Son güncelleme: ${snap.data().updated_at ? new Date(snap.data().updated_at).toLocaleString('tr-TR') : '—'}`);
-      } else {
-        this._content = '';
-        this._loaded = true;
-        this._setStatus('Firebase\'de henüz kayıt yok');
+        const data = { key, ...snap.data() };
+        this._cache[key] = data;
+        return data;
       }
+      return null;
     } catch(e) {
-      console.warn('[Kanon] Yükleme hatası:', e);
-      this._setStatus('⚠️ Yükleme hatası: ' + e.message);
+      console.warn('[KanonDB] Doküman yükleme hatası:', key, e);
+      return null;
     }
   },
 
-  /* Firebase'e kaydet */
-  async save() {
-    const inp = document.getElementById('kanon-editor-inp');
-    if (!inp) return;
-    this._content = inp.value;
-    this._setStatus('Kaydediliyor…');
+  /* ── Doküman kaydet ──────────────────────────────── */
+  async saveDoc(key, content, meta = {}) {
     try {
       const {db, fs} = await _fbReady();
-      const ref = fs.doc(db, 'settings', 'kanon_bilgi');
-      await fs.setDoc(ref, {
-        content: this._content,
-        updated_at: new Date().toISOString(),
-        char_count: this._content.length,
-        word_count: this._content.split(/\s+/).filter(Boolean).length
-      });
-      this._dirty = false;
-      this._setStatus(`✅ Kaydedildi — ${this._content.split(/\s+/).filter(Boolean).length.toLocaleString()} kelime`);
-      toast('Kanon bilgi tabanı kaydedildi', 'success');
+      const ref = fs.doc(db, 'kanon', key);
+      const data = { content, updated_at: new Date().toISOString(),
+        word_count: content.split(/\s+/).filter(Boolean).length, ...meta };
+      await fs.setDoc(ref, data);
+      this._cache[key] = { key, ...data };
+      // Liste cache'ini güncelle
+      if (this._listCache) {
+        const idx = this._listCache.findIndex(d => d.key === key);
+        if (idx >= 0) this._listCache[idx] = { key, ...data };
+        else this._listCache.push({ key, ...data });
+      }
+      return true;
     } catch(e) {
-      console.warn('[Kanon] Kaydetme hatası:', e);
-      this._setStatus('⚠️ Kaydetme hatası: ' + e.message);
-      toast('Kaydetme hatası: ' + e.message, 'error');
+      console.warn('[KanonDB] Kaydetme hatası:', key, e);
+      return false;
     }
   },
 
-  /* Modal aç */
+  /* ── Doküman sil ─────────────────────────────────── */
+  async deleteDoc(key) {
+    try {
+      const {db, fs} = await _fbReady();
+      await fs.deleteDoc(fs.doc(db, 'kanon', key));
+      delete this._cache[key];
+      if (this._listCache) this._listCache = this._listCache.filter(d => d.key !== key);
+      return true;
+    } catch(e) { return false; }
+  },
+
+  /* ── MD belgesini bölümlere ayırıp toplu yükle ───── */
+  async importFromMarkdown(mdText) {
+    const sections = this._parseMarkdown(mdText);
+    let saved = 0;
+    for (const s of sections) {
+      const ok = await this.saveDoc(s.key, s.content, { label: s.label, type: s.type });
+      if (ok) saved++;
+    }
+    this._listCache = null; // listeyi yenile
+    await this.loadList();
+    return saved;
+  },
+
+  /* ── Markdown'ı bölümlere ayır ───────────────────── */
+  _parseMarkdown(md) {
+    const lines = md.split('\n');
+    const sections = [];
+
+    // Sabit bölümler
+    const fixedSections = [
+      { heads: ['## 1.', '## 2.', '## 3.', '## 4.'], key: 'meta', label: '📋 Kılavuz & Dünya', type: 'meta' },
+      { heads: ['## 5.'], key: 'current_state', label: '🔴 Son Durum', type: 'current_state' },
+      { heads: ['## 10.', '## 11.', '## 12.', '## 13.'], key: 'timeline', label: '📅 Zaman & İplikler', type: 'timeline' },
+    ];
+
+    // Karakter profilleri (## 6. altındaki ### başlıkları)
+    const charSection = { key: 'chars_all', label: '👥 Tüm Karakterler', type: 'chars', chars: {} };
+    // Gruplar (## 7.)
+    const factionSection = { key: 'factions_all', label: '🏛️ Gruplar', type: 'factions' };
+    // Mekanlar (## 8.), Sözlük (## 9.)
+    const worldSection = { key: 'world', label: '🗺️ Mekanlar & Sözlük', type: 'world' };
+
+    let currentSection = null;
+    let currentCharName = null;
+    let inChars = false, inFactions = false, inWorld = false;
+    const buffers = {};
+    fixedSections.forEach(s => { buffers[s.key] = []; });
+    buffers['chars_all'] = {};  // {charName: lines[]}
+    buffers['factions_all'] = [];
+    buffers['world'] = [];
+
+    for (const line of lines) {
+      const isH2 = /^## /.test(line);
+      const isH3 = /^### /.test(line);
+
+      if (isH2) {
+        inChars = /^## 6\./.test(line);
+        inFactions = /^## 7\./.test(line);
+        inWorld = /^## [89]\./.test(line);
+        currentCharName = null;
+
+        // Hangi sabit bölüme ait?
+        currentSection = null;
+        for (const fs of fixedSections) {
+          if (fs.heads.some(h => line.startsWith(h))) { currentSection = fs.key; break; }
+        }
+      }
+
+      if (inChars) {
+        if (isH3 || (isH2 && /^## 6\./.test(line))) {
+          if (isH3) {
+            // "#### Alt grup başlığı" gibi değil, ### karakter başlığı
+            currentCharName = line.replace(/^###\s*/, '').replace(/\s*\(.*\)/, '').trim();
+            if (!buffers['chars_all'][currentCharName]) buffers['chars_all'][currentCharName] = [];
+          }
+          if (!isH3) buffers['chars_all']['__header__'] = (buffers['chars_all']['__header__'] || []).concat(line);
+        } else if (currentCharName) {
+          buffers['chars_all'][currentCharName].push(line);
+        }
+      } else if (inFactions) {
+        buffers['factions_all'].push(line);
+      } else if (inWorld) {
+        buffers['world'].push(line);
+      } else if (currentSection) {
+        buffers[currentSection].push(line);
+      }
+    }
+
+    // Sabit bölümleri sections'a ekle
+    for (const fs of fixedSections) {
+      const content = buffers[fs.key].join('\n').trim();
+      if (content.length > 20) sections.push({ key: fs.key, label: fs.label, type: fs.type, content });
+    }
+
+    // Karakterleri ayrı ayrı kaydet (her karakter kendi dokümanı)
+    for (const [charName, charLines] of Object.entries(buffers['chars_all'])) {
+      if (charName === '__header__') continue;
+      if (!charLines.length) continue;
+      const slug = 'chars/' + this._slug(charName);
+      const content = `### ${charName}\n${charLines.join('\n')}`.trim();
+      sections.push({ key: slug, label: charName, type: 'char', content });
+    }
+
+    // Gruplar
+    const factionContent = buffers['factions_all'].join('\n').trim();
+    if (factionContent.length > 20) sections.push({ key: 'factions_all', label: '🏛️ Gruplar', type: 'factions', content: factionContent });
+
+    // Dünya
+    const worldContent = buffers['world'].join('\n').trim();
+    if (worldContent.length > 20) sections.push({ key: 'world', label: '🗺️ Mekanlar & Sözlük', type: 'world', content: worldContent });
+
+    return sections;
+  },
+
+  /* ── MA için prompt metni oluştur ────────────────── */
+  async buildPromptContext(activeCharNames = []) {
+    const parts = [];
+
+    // 1. Her zaman: meta (kılavuz + dünya/ton)
+    const meta = await this.loadDoc('meta');
+    if (meta?.content) parts.push('=== KANON: KILAVUZ & DÜNYA ===\n' + meta.content);
+
+    // 2. Her zaman: current_state (son durum)
+    const state = await this.loadDoc('current_state');
+    if (state?.content) parts.push('=== KANON: SON DURUM (2026-09-23) ===\n' + state.content);
+
+    // 3. Sahnedeki karakterlerin profilleri
+    if (activeCharNames.length > 0) {
+      const charParts = [];
+      for (const name of activeCharNames) {
+        const slug = 'chars/' + this._slug(name);
+        const doc = await this.loadDoc(slug);
+        if (doc?.content) charParts.push(doc.content);
+      }
+      if (charParts.length) parts.push('=== KANON: SAHNEDEKİ KARAKTERLER ===\n' + charParts.join('\n\n---\n\n'));
+    }
+
+    return parts.join('\n\n');
+  },
+
+  /* ── Observer için kısa prompt (meta + current_state) */
+  async buildObserverContext() {
+    const parts = [];
+    const meta = await this.loadDoc('meta');
+    if (meta?.content) parts.push(meta.content.slice(0, 4000));
+    const state = await this.loadDoc('current_state');
+    if (state?.content) parts.push(state.content.slice(0, 6000));
+    return parts.join('\n\n');
+  },
+
+  /* ── Sahnedeki karakter isimlerini mesajlardan çıkar */
+  extractActiveChars(msgContext = '') {
+    if (!this._listCache) return [];
+    const charKeys = this._listCache.filter(d => d.key.startsWith('chars/')).map(d => ({
+      key: d.key, label: d.label || d.key.replace('chars/','')
+    }));
+    const found = [];
+    for (const c of charKeys) {
+      const name = c.label.toLowerCase();
+      if (msgContext.toLowerCase().includes(name) || msgContext.toLowerCase().includes(this._slug(c.label))) {
+        found.push(c.label);
+      }
+    }
+    return found.slice(0, 6); // max 6 karakter
+  },
+};
+window.KanonDB = KanonDB;
+
+/* ══════════════════════════════════════════════════════
+   KANON EDİTÖR UI — KanonDB üzerinde çalışan editör
+════════════════════════════════════════════════════════ */
+const KanonEditor = {
+  _dirty: false,
+  _activeKey: null,
+
   async open() {
-    document.getElementById('m-kanon')?.classList.remove('hidden');
-    if (!this._loaded) {
-      this._setStatus('Yükleniyor…');
-      await this._load();
-    }
-    const inp = document.getElementById('kanon-editor-inp');
-    if (inp) {
-      inp.value = this._content;
-      inp.addEventListener('input', () => { this._dirty = true; }, { once: false });
-    }
+    const modal = document.getElementById('m-kanon');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    this._setStatus('Yükleniyor…');
+    await KanonDB.loadList();
+    this._renderList();
+    // Varsayılan olarak current_state aç
+    await this.openDoc('current_state');
   },
 
-  /* Modal kapat */
   close() {
-    if (this._dirty) {
-      if (!confirm('Kaydedilmemiş değişiklikler var. Çıkmak istediğine emin misin?')) return;
-    }
+    if (this._dirty && !confirm('Kaydedilmemiş değişiklikler var. Çıkmak istediğine emin misin?')) return;
     document.getElementById('m-kanon')?.classList.add('hidden');
     this._dirty = false;
+  },
+
+  _renderList() {
+    const el = document.getElementById('kanon-list');
+    if (!el) return;
+    const list = KanonDB._listCache || [];
+
+    const groups = [
+      { label: '📋 Kılavuz & Dünya', keys: ['meta'], type: 'meta' },
+      { label: '🔴 Son Durum', keys: ['current_state'], type: 'current_state' },
+      { label: '📅 Zaman & İplikler', keys: ['timeline'], type: 'timeline' },
+      { label: '🏛️ Gruplar', keys: ['factions_all'], type: 'factions' },
+      { label: '🗺️ Mekan & Sözlük', keys: ['world'], type: 'world' },
+    ];
+    const charDocs = list.filter(d => d.key.startsWith('chars/')).sort((a,b) => (a.label||a.key).localeCompare(b.label||b.key));
+
+    let html = '';
+    for (const g of groups) {
+      const doc = list.find(d => g.keys.includes(d.key));
+      const active = this._activeKey === g.keys[0] ? 'background:var(--ac-d);border-left:2px solid var(--pu);' : '';
+      const words = doc?.word_count ? `<span style="color:var(--t3);font-size:9px">${doc.word_count.toLocaleString()} k</span>` : '<span style="color:var(--t3);font-size:9px">boş</span>';
+      html += `<div onclick="KanonEditor.openDoc('${g.keys[0]}')" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--ln);${active}" onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background='${active?'var(--ac-d)':''}'">${g.label} ${words}</div>`;
+    }
+
+    if (charDocs.length) {
+      html += `<div style="padding:4px 12px;font-size:9px;color:var(--t3);font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid var(--ln);display:flex;align-items:center;justify-content:space-between">
+        <span>👥 Karakterler (${charDocs.length})</span>
+        <button onclick="KanonEditor.newChar()" style="background:var(--pu);border:none;color:#fff;border-radius:3px;padding:1px 6px;cursor:pointer;font-size:9px">+ Yeni</button>
+      </div>`;
+      for (const d of charDocs) {
+        const name = d.label || d.key.replace('chars/','');
+        const active = this._activeKey === d.key ? 'background:var(--ac-d);border-left:2px solid var(--pu);' : '';
+        const words = d.word_count ? `<span style="color:var(--t3);font-size:9px">${d.word_count} k</span>` : '';
+        html += `<div onclick="KanonEditor.openDoc('${d.key}')" style="padding:6px 12px 6px 18px;cursor:pointer;display:flex;align-items:center;gap:6px;border-bottom:1px solid rgba(255,255,255,.04);${active}" onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background='${active?'var(--ac-d)':''}'">`
+          + `<span style="flex:1;font-size:11px;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</span>${words}`
+          + `<button onclick="event.stopPropagation();KanonEditor.deleteDoc('${d.key}')" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:10px;padding:0 2px" title="Sil">✕</button></div>`;
+      }
+    } else {
+      html += `<div style="padding:8px 12px;font-size:10px;color:var(--t3);border-bottom:1px solid var(--ln)">Henüz karakter yok — MD içe aktar</div>`;
+    }
+
+    el.innerHTML = html;
+  },
+
+  async openDoc(key) {
+    if (this._dirty && !confirm('Kaydedilmemiş değişiklikler var. Devam et?')) return;
+    this._dirty = false;
+    this._activeKey = key;
+
+    const inp = document.getElementById('kanon-editor-inp');
+    const titleEl = document.getElementById('kanon-doc-title');
+    if (!inp) return;
+
+    inp.value = 'Yükleniyor…';
+    if (titleEl) titleEl.textContent = key;
+
+    const doc = await KanonDB.loadDoc(key);
+    inp.value = doc?.content || '';
+    if (titleEl) titleEl.textContent = doc?.label || key;
+    this._setStatus(doc?.updated_at ? `Son güncelleme: ${new Date(doc.updated_at).toLocaleString('tr-TR')}` : 'Yeni doküman');
+    this._renderList();
+
+    inp.oninput = () => { this._dirty = true; this._setStatus('● Kaydedilmemiş değişiklik'); };
+  },
+
+  async save() {
+    const inp = document.getElementById('kanon-editor-inp');
+    const titleEl = document.getElementById('kanon-doc-title');
+    if (!inp || !this._activeKey) return;
+    this._setStatus('Kaydediliyor…');
+    const label = titleEl?.textContent || this._activeKey;
+    const ok = await KanonDB.saveDoc(this._activeKey, inp.value, { label });
+    if (ok) {
+      this._dirty = false;
+      this._setStatus(`✅ Kaydedildi — ${inp.value.split(/\s+/).filter(Boolean).length.toLocaleString()} kelime`);
+      this._renderList();
+      toast('Kaydedildi', 'success');
+    } else {
+      this._setStatus('⚠️ Kaydetme hatası');
+      toast('Kaydetme hatası', 'error');
+    }
+  },
+
+  async deleteDoc(key) {
+    if (!confirm(`"${key}" dokümanını silmek istediğine emin misin?`)) return;
+    await KanonDB.deleteDoc(key);
+    if (this._activeKey === key) {
+      this._activeKey = null;
+      const inp = document.getElementById('kanon-editor-inp');
+      if (inp) inp.value = '';
+    }
+    this._renderList();
+    toast('Silindi', 'success');
+  },
+
+  newChar() {
+    const name = prompt('Karakter adı:');
+    if (!name?.trim()) return;
+    const key = 'chars/' + KanonDB._slug(name.trim());
+    KanonDB._cache[key] = { key, label: name.trim(), content: `### ${name.trim()}\n\n`, type: 'char' };
+    if (KanonDB._listCache) KanonDB._listCache.push({ key, label: name.trim(), type: 'char' });
+    this._renderList();
+    this.openDoc(key);
+  },
+
+  /* ── MD dosyasından toplu içe aktar ─────────────── */
+  async importMD() {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = '.md,.txt';
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      this._setStatus('İçe aktarılıyor…');
+      const text = await file.text();
+      const count = await KanonDB.importFromMarkdown(text);
+      this._renderList();
+      await this.openDoc('current_state');
+      this._setStatus(`✅ ${count} bölüm içe aktarıldı`);
+      toast(`${count} bölüm içe aktarıldı`, 'success');
+    };
+    input.click();
   },
 
   _setStatus(txt) {
@@ -5713,33 +6079,207 @@ const KanonEditor = {
     if (el) el.textContent = txt;
   },
 
-  /* Prompt enjeksiyonu — MA için tam belge, Observer için Bölüm 1+5 özeti */
-  _getForPrompt(observerMode = false) {
-    if (!this._content || this._content.trim().length < 50) return '';
-    if (!observerMode) {
-      // MA: tam belge (Gemini 2.5'in context'i kaldırır)
-      return this._content;
-    }
-    // Observer: sadece Bölüm 1 (Kılavuz) ve Bölüm 5 (Son Durum) — daha az token
-    const lines = this._content.split('\n');
-    const result = [];
-    let capture = false;
-    let sectionDepth = 0;
-    for (const line of lines) {
-      // Bölüm 1 veya 5 başlığı
-      if (/^## [15]\./.test(line) || /^## 1\b/.test(line) || /^## 5\b/.test(line)) {
-        capture = true; sectionDepth = 0;
-      }
-      // Başka bir ## bölümü başlarsa dur
-      else if (/^## [^15]/.test(line) && capture) {
-        capture = false;
-      }
-      if (capture) result.push(line);
-    }
-    return result.join('\n').slice(0, 12000); // max 12k char Observer için
-  },
+  /* Eski _getForPrompt — geriye dönük uyumluluk */
+  _getForPrompt() { return ''; },
 };
 window.KanonEditor = KanonEditor;
+
+/* ═══════════════════════════════════════════════════════════════════
+   LORE KEEPER — NYC_RP Kanon Arşivi Kütüphanecisi
+   Üç panel: Bölüm sekmeler | İtem listesi | İçerik + AI sohbet
+   Gemini 2.0 Flash ile soru-cevap (sadece ilgili dokümanlar context)
+════════════════════════════════════════════════════════════════════ */
+const LoreKeeper = {
+  _activeSection: null, // 'chars' | 'timeline' | 'factions' | 'world' | 'current' | 'meta'
+  _activeKey: null,
+  _chatHistory: [], // [{role, text}]
+  _busy: false,
+
+  // Bölüm tanımları
+  _sections: [
+    { id: 'chars',    icon: '👤', label: 'Karakterler',   prefix: 'chars/' },
+    { id: 'current',  icon: '📊', label: 'Güncel Durum',  key: 'current_state' },
+    { id: 'timeline', icon: '📅', label: 'Timeline',      key: 'timeline' },
+    { id: 'factions', icon: '🏛️', label: 'Gruplar',       key: 'factions_all' },
+    { id: 'world',    icon: '🗺️', label: 'Dünya / Lore',  key: 'world' },
+    { id: 'meta',     icon: '📋', label: 'Rehber',        key: 'meta' },
+  ],
+
+  async open() {
+    document.getElementById('m-lore')?.classList.remove('hidden');
+    this._setStatus('Yükleniyor…');
+    await KanonDB.loadList().catch(() => {});
+    this._renderTabs();
+    // Default: karakterler
+    await this.selectSection(this._activeSection || 'chars');
+    this._setStatus('Hazır');
+  },
+
+  close() {
+    document.getElementById('m-lore')?.classList.add('hidden');
+  },
+
+  _setStatus(txt) {
+    const el = document.getElementById('lk-status');
+    if (el) el.textContent = txt;
+  },
+
+  _renderTabs() {
+    const el = document.getElementById('lk-tabs');
+    if (!el) return;
+    el.innerHTML = this._sections.map(s => {
+      const active = this._activeSection === s.id;
+      return `<div onclick="LoreKeeper.selectSection('${s.id}')" style="padding:10px 14px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(255,255,255,.04);${active ? 'background:var(--ac-d);color:var(--ac);font-weight:600;border-left:2px solid var(--ac)' : 'color:var(--t2)'}" onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background='${active ? 'var(--ac-d)' : ''}'">
+        <span>${s.icon}</span><span>${s.label}</span>
+      </div>`;
+    }).join('');
+  },
+
+  async selectSection(sectionId) {
+    this._activeSection = sectionId;
+    this._activeKey = null;
+    this._renderTabs();
+    const sec = this._sections.find(s => s.id === sectionId);
+    if (!sec) return;
+
+    if (sectionId === 'chars') {
+      // List all character docs
+      this._renderCharList();
+      this._showContent('<div style="color:var(--t3);font-size:12px;padding:20px">Sol listeden bir karakter seç.</div>');
+    } else {
+      // Single doc sections
+      this._renderListSingle(sec);
+      await this.openDoc(sec.key);
+    }
+  },
+
+  _renderCharList() {
+    const el = document.getElementById('lk-list');
+    if (!el) return;
+    const chars = (KanonDB._listCache || []).filter(d => d.key?.startsWith('chars/'));
+    if (!chars.length) {
+      el.innerHTML = '<div style="padding:12px;color:var(--t3);font-size:11px">Karakter yok.<br><small>Kanon\'dan İçe Aktar</small></div>';
+      return;
+    }
+    el.innerHTML = chars.map(c => {
+      const active = this._activeKey === c.key;
+      return `<div onclick="LoreKeeper.openDoc('${c.key}')" style="padding:8px 14px;cursor:pointer;font-size:11px;font-family:var(--sans);display:flex;align-items:center;gap:6px;border-bottom:1px solid rgba(255,255,255,.04);${active ? 'background:rgba(80,200,150,.12);color:#50c896' : 'color:var(--t1)'}" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='${active ? 'rgba(80,200,150,.12)' : ''}'">
+        👤 <span style="flex:1">${c.label || c.key.replace('chars/','')}</span>
+        <span style="font-size:9px;color:var(--t3)">${c.word_count ? c.word_count + 'k' : ''}</span>
+      </div>`;
+    }).join('');
+  },
+
+  _renderListSingle(sec) {
+    const el = document.getElementById('lk-list');
+    if (!el) return;
+    el.innerHTML = `<div style="padding:10px 14px;font-size:11px;color:#50c896;font-weight:600;border-bottom:1px solid var(--ln)">${sec.icon} ${sec.label}</div>
+      <div onclick="LoreKeeper.openDoc('${sec.key}')" style="padding:8px 14px;cursor:pointer;font-size:11px;color:var(--t1)">📄 Tüm içerik</div>`;
+  },
+
+  async openDoc(key) {
+    this._activeKey = key;
+    if (this._activeSection === 'chars') this._renderCharList();
+    this._showContent('<div style="color:var(--t3);font-size:11px;padding:12px">Yükleniyor…</div>');
+    this._setStatus('Yükleniyor…');
+    const doc = await KanonDB.loadDoc(key).catch(() => null);
+    if (!doc) {
+      this._showContent('<div style="color:var(--t3);font-size:12px;padding:20px">Bu bölüm henüz içe aktarılmamış.<br><small>📥 Kanon → İçe Aktar</small></div>');
+      this._setStatus('İçerik yok');
+      return;
+    }
+    this._renderMarkdown(doc.content || '');
+    this._setStatus(`${doc.word_count ? doc.word_count + ' kelime' : 'Yüklendi'}`);
+    // Clear chat context when switching doc
+    this._chatHistory = [];
+    document.getElementById('lk-chat-log').innerHTML = '';
+  },
+
+  _renderMarkdown(md) {
+    // Simple markdown render: headers, bold, italic, bullet lists
+    let html = md
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/^### (.+)$/gm, '<h3 style="font-size:13px;color:var(--t0);margin:14px 0 4px;border-bottom:1px solid var(--ln);padding-bottom:3px">$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2 style="font-size:14px;color:#50c896;margin:18px 0 6px;font-weight:700">$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1 style="font-size:16px;color:var(--t0);margin:0 0 12px;font-weight:700">$1</h1>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong style="color:var(--t0)">$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em style="color:var(--t2)">$1</em>')
+      .replace(/^[-•] (.+)$/gm, '<div style="padding:2px 0 2px 14px;position:relative"><span style="position:absolute;left:4px;color:var(--t3)">›</span>$1</div>')
+      .replace(/\n{2,}/g, '<div style="margin:6px 0"></div>')
+      .replace(/\n/g, '<br>');
+    this._showContent(`<div style="font-family:var(--sans)">${html}</div>`);
+  },
+
+  _showContent(html) {
+    const el = document.getElementById('lk-content');
+    if (el) { el.innerHTML = html; el.scrollTop = 0; }
+  },
+
+  // ── AI Soru-Cevap ──────────────────────────────────────────────
+  async ask() {
+    if (this._busy) return;
+    const inp = document.getElementById('lk-inp');
+    const q = inp?.value?.trim();
+    if (!q) return;
+    inp.value = '';
+    this._addChat('user', q);
+    this._busy = true;
+    this._setStatus('Düşünüyor…');
+
+    try {
+      // Build context: always active doc + related docs if chars
+      let ctx = '';
+      if (this._activeKey) {
+        const doc = await KanonDB.loadDoc(this._activeKey).catch(() => null);
+        if (doc?.content) ctx += `\n=== ${this._activeKey} ===\n${doc.content.slice(0, 8000)}\n`;
+      }
+      // If chars section, also include meta+current_state for broader context
+      if (this._activeSection === 'chars') {
+        const meta = await KanonDB.loadDoc('meta').catch(() => null);
+        const cur  = await KanonDB.loadDoc('current_state').catch(() => null);
+        if (meta?.content) ctx += `\n=== DÜNYA / REHBER ===\n${meta.content.slice(0, 3000)}\n`;
+        if (cur?.content)  ctx += `\n=== GÜNCEL DURUM ===\n${cur.content.slice(0, 2000)}\n`;
+      }
+
+      const historyTxt = this._chatHistory.slice(-6).map(h => `${h.role === 'user' ? 'Kullanıcı' : 'Lore Keeper'}: ${h.text}`).join('\n');
+      const prompt = `Sen NYC_RP'nin Lore Keeper'ısın — bir kütüphaneci gibi rolün hikayesini ve sürekliliğini korursun. Sana aşağıdaki lore belgesi verildi. Soruları TÜRKÇE, kısa ve net yanıtla. Belgede olmayan şeyi uydurmadan "Belgede bu bilgi yok" de.
+
+${ctx ? '=== LORE BELGESİ ===\n' + ctx : '(Belge yok — genel lore bilginle cevapla)'}
+
+${historyTxt ? '=== ÖNCEKİ KONUŞMA ===\n' + historyTxt : ''}
+
+Kullanıcı sorusu: ${q}`;
+
+      const text = await _geminiGenerate(prompt, { temperature: 0.3, maxOutputTokens: 800, model: 'gemini-2.0-flash' });
+      this._addChat('lore', text);
+      this._chatHistory.push({ role: 'user', text: q }, { role: 'lore', text });
+      if (this._chatHistory.length > 20) this._chatHistory = this._chatHistory.slice(-16);
+    } catch(e) {
+      this._addChat('error', '❌ ' + e.message);
+    }
+    this._busy = false;
+    this._setStatus('Hazır');
+  },
+
+  _addChat(role, text) {
+    const log = document.getElementById('lk-chat-log');
+    if (!log) return;
+    const color = role === 'user' ? 'var(--ac)' : role === 'lore' ? '#50c896' : '#f77';
+    const label = role === 'user' ? 'Sen' : role === 'lore' ? '📖 Lore Keeper' : '⚠️';
+    const div = document.createElement('div');
+    div.style.cssText = 'margin-bottom:8px;padding:7px 10px;border-radius:6px;background:var(--bg3)';
+    div.innerHTML = `<div style="font-size:9px;color:${color};font-weight:700;margin-bottom:3px;font-family:var(--mono)">${label}</div><div style="font-size:11px;color:var(--t1);line-height:1.5;white-space:pre-wrap">${text.replace(/</g,'&lt;')}</div>`;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  },
+
+  clearChat() {
+    this._chatHistory = [];
+    const log = document.getElementById('lk-chat-log');
+    if (log) log.innerHTML = '';
+  },
+};
+window.LoreKeeper = LoreKeeper;
 
 const MasterAgent = {
   _history: [],          // {role:'user'|'model', parts:[{text}]}
@@ -5790,12 +6330,15 @@ const MasterAgent = {
     }, 2000); // debounce 2s
   },
 
-  /* ── Build system prompt (called once) ─────────────── */
-  _buildSystem() {
+  /* ── Build system prompt (async — fetches kanon from Firebase) ── */
+  async _buildSystem() {
     const now = new Date().toLocaleString('tr-TR');
     const rpTime = (S.roomId ? RpTime.get(S.roomId) : null) || '—';
     const worldSnap = OAI?._worldSnapshot || '(henüz oluşturulmadı)';
-    const kanonCtx = window.KanonEditor?._getForPrompt() || '';
+    // Fetch kanon context: active chars in scene for targeted char profiles
+    const recentMsgText = (window.Msgs||[]).slice(-30).map(m=>m.char_name||'').join(' ');
+    const activeCharNames = window.KanonDB ? KanonDB.extractActiveChars(recentMsgText) : [];
+    const kanonCtx = window.KanonDB ? (await KanonDB.buildPromptContext(activeCharNames)) : '';
     const dmCtx = (typeof window.DMEngine !== 'undefined' && DMEngine.getContext)
       ? DMEngine.getContext().toString().slice(0, 2000)
       : '(DM Engine bağlı değil)';
@@ -6271,8 +6814,8 @@ const MasterAgent = {
     if (sendMsgMatch) {
       try {
         const params = JSON.parse(sendMsgMatch[1]);
-        const roomId = params.room_id || S.roomId;
-        if (!roomId) throw new Error('Aktif oda yok');
+        const roomId = params.room_id || S.roomId || (() => { try { return localStorage.getItem('nycrp_lastRoomId'); } catch(_) { return null; } })();
+        if (!roomId) throw new Error('Aktif oda yok — lütfen önce bir odaya gir');
         if (!params.content?.trim()) throw new Error('İçerik boş');
 
         // Resolve char info:
@@ -6400,7 +6943,7 @@ const MasterAgent = {
       MasterAgent._execSendMsg = async function(params, results) {
         // Sadece o tek mesajı tekrar işle — basit DB.post
         try {
-          const roomId = params.room_id || S.roomId;
+          const roomId = params.room_id || S.roomId || (() => { try { return localStorage.getItem('nycrp_lastRoomId'); } catch(_) { return null; } })();
           const found = params.char_id ? (S.chars||[]).find(c => String(c.id) === String(params.char_id)) : null;
           const charName = found?.name || params.char_name || 'NPC';
           const charAlias = found?.alias || params.char_alias || '';
@@ -6429,7 +6972,7 @@ const MasterAgent = {
     if (window.UI) UI.renderTyping();
 
     // Rebuild system prompt each time (active char/room may have changed)
-    this._SYSTEM = this._buildSystem();
+    this._SYSTEM = await this._buildSystem();
 
     // Push user message — include transcript only when needed (billing-efficient)
     // Auto-react always gets transcript (it IS the scene continuation trigger)
